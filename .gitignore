@@ -1,0 +1,16 @@
+# Entornos virtuales
+venv/
+.venv/
+
+# Archivos de entorno / secretos
+.env
+
+# Cachés y compilados
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+# Archivos de logs
+*.log
