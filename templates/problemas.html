@@ -426,8 +426,10 @@
                             return; 
                         }
 
-                        // Enviar mensaje de usuario y limpiar la caja
+                        // Enviar mensaje de usuario (con chat abierto y placeholder)
+                        ensureChatOpen();
                         appendBubble(finalQ, "user");
+                        appendThinkingBubble();
                         await askWithText(finalQ);
                         chatInput.value = "";
 
@@ -492,19 +494,14 @@
                 }
 
                 if (userPrompt) {
-                    const speakWanted = !userWantsSilence(userPrompt);
+                    // Abre chat, muestra la pregunta y agrega placeholder
+                    ensureChatOpen();
+                    appendBubble(userPrompt, 'user');
+                    appendThinkingBubble();
                     try {
-                        const askRes = await fetch('/ask', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ q: userPrompt, filename: data.filename, speak: speakWanted })
-                        });
-                        const bot = await askRes.json();
-                        openAssistantWith(userPrompt, bot?.answer || 'Listo. ¿Qué más necesitas?', data?.resumen_inspeccion || {});
-                        lastAnswerTTS = speakWanted ? (bot?.tts_text || bot?.answer || "") : "";
-                        if (lastAnswerTTS) speak(lastAnswerTTS);
-                        userPromptEl.value = '';
+                        await askWithText(userPrompt);   // usa reintentos y reemplaza “pensando…”
                     } catch(e){ console.error('No se pudo consultar al asistente:', e); }
+                    userPromptEl.value = '';
                 }
 
                 reset();
@@ -648,28 +645,66 @@
             if (botText) { appendBubble(botText, 'bot'); }
         }
 
+        // ====== utilidades de placeholder "Pensando…" ======
+        function appendThinkingBubble(){
+            const body = document.getElementById('chatBody');
+            const div = document.createElement('div');
+            div.className = 'bubble bot thinking';
+            div.textContent = 'Pensando…';
+            body.appendChild(div);
+            scrollChatToEnd();
+            return div;
+        }
+        function replaceThinkingBubble(who, text){
+            const body = document.getElementById('chatBody');
+            const nodes = [...body.querySelectorAll('.bubble.thinking')];
+            const target = nodes.pop();
+            if (target) {
+                target.classList.remove('thinking');
+                target.textContent = text;
+            } else {
+                appendBubble(text, who);
+            }
+        }
+
+        // ====== /ask con reintentos y control de 502/no-JSON ======
         async function askWithText(q){
             const speakWanted = !userWantsSilence(q);
-            try {
-                const payload = { q, speak: speakWanted };
-                if (lastFilename) payload.filename = lastFilename;
+            const payload = { q, speak: speakWanted };
+            if (lastFilename) payload.filename = lastFilename;
 
-                const res = await fetch('/ask', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (data.error) {
-                    appendBubble(`Error: ${data.error}`, 'bot');
-                } else {
-                    appendBubble(data.answer || 'Listo.', 'bot');
-                    lastAnswerTTS = speakWanted ? (data.tts_text || data.answer || '') : '';
-                    if (lastAnswerTTS) speak(lastAnswerTTS);
+            // hasta 3 reintentos con backoff
+            let data = null, errorFinal = null;
+            for (let i=0;i<3;i++){
+                try{
+                    const res = await fetch('/ask', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) throw new Error('HTTP '+res.status);
+                    const ct = res.headers.get('content-type') || '';
+                    if (!ct.includes('application/json')) throw new Error('Non-JSON response');
+                    data = await res.json();
+                    break;
+                }catch(e){
+                    errorFinal = e;
+                    await new Promise(r => setTimeout(r, i===0 ? 600 : 1000));
                 }
-            } catch (e) {
-                appendBubble('Hubo un problema al consultar el asistente.', 'bot');
-                console.error(e);
+            }
+
+            if (!data) {
+                replaceThinkingBubble('bot','Servidor ocupado. Intenta de nuevo en unos segundos.');
+                console.error('ask error', errorFinal);
+                return;
+            }
+
+            if (data.error) {
+                replaceThinkingBubble('bot', `Error: ${data.error}`);
+            } else {
+                replaceThinkingBubble('bot', data.answer || 'Listo.');
+                lastAnswerTTS = speakWanted ? (data.tts_text || data.answer || '') : '';
+                if (lastAnswerTTS) speak(lastAnswerTTS);
             }
         }
 
@@ -677,7 +712,9 @@
             const input = document.getElementById('chatInput');
             const q = (input.value || '').trim();
             if (!q) return;
+            ensureChatOpen();
             appendBubble(q, 'user');
+            appendThinkingBubble();
             input.value = '';
             await askWithText(q);
         }
