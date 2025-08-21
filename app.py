@@ -214,6 +214,19 @@ def _merge_and_normalize(chunks_map: dict) -> str:
         merged = _smart_merge(merged, chunks_map[k])
     return _normalize_es(merged)
 
+# ====== NUEVO: helpers de cache JSON ======
+def load_cached_result(filename):
+    """Lee el resultado de inspección cacheado como JSON en static/results/<filename>.json."""
+    try:
+        path = os.path.join(app.config['RESULT_FOLDER'], secure_filename(filename) + ".json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        app.logger.warning(f"No se pudo leer cache JSON: {e}")
+    return None
+# ==========================================
+
 # ========= Flask =========
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
@@ -286,6 +299,15 @@ def upload_file():
             result["summary_tts_text"] = None
             result["summary_tts_id"] = ""
 
+        # ====== NUEVO: Guardar cache JSON para que el chat tenga contexto por filename
+        try:
+            json_path = os.path.join(app.config['RESULT_FOLDER'], f"{filename}.json")
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False)
+        except Exception as e:
+            app.logger.warning(f"No se pudo cachear JSON en /upload: {e}")
+        # ======================================================================
+
         last_result = result
         chat_progress.pop(filename, None)
 
@@ -339,6 +361,15 @@ def inspect_file(filename):
             result["summary_tts_text"] = None
             result["summary_tts_id"] = ""
 
+        # ====== NUEVO: Guardar cache JSON también aquí
+        try:
+            json_path = os.path.join(app.config['RESULT_FOLDER'], f"{filename}.json")
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False)
+        except Exception as e:
+            app.logger.warning(f"No se pudo cachear JSON en /inspect: {e}")
+        # ==============================================
+
         last_result = result
         chat_progress.pop(filename, None)
         return jsonify(result)
@@ -389,17 +420,25 @@ def ask():
     # Limpiar frases de control del prompt enviado al modelo
     question = _strip_control_phrases(raw_question)
 
-    # Contexto: última inspección o por filename
+    # ====== CAMBIO CLAVE: Contexto desde cache JSON por filename (si existe)
     ctx_result = last_result
     if filename:
         if not allowed_file(filename):
             return jsonify({'error': 'Tipo de archivo no permitido'}), 400
-        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(filename))
-        if os.path.exists(upload_path) and detector is not None:
-            try:
-                ctx_result = detector.detect_problems(upload_path)
-            except Exception as e:
-                app.logger.error(f"Error creando contexto para chatbot: {str(e)}")
+
+        # 1) Intentar primero leer el resultado cacheado en JSON
+        cached = load_cached_result(filename)
+        if cached:
+            ctx_result = cached
+        else:
+            # 2) Fallback: volver a correr el detector si existe el archivo
+            upload_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(filename))
+            if os.path.exists(upload_path) and detector is not None:
+                try:
+                    ctx_result = detector.detect_problems(upload_path)
+                except Exception as e:
+                    app.logger.error(f"Error creando contexto para chatbot: {str(e)}")
+    # ======================================================================
 
     compact_ctx = _compact_result_for_llm(ctx_result) if ctx_result else {}
 
