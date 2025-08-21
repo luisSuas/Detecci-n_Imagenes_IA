@@ -687,6 +687,11 @@ def stt_close():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    
+# ====== NUEVO ENDPOINT DE SALUD ======
+@app.route("/healthz", methods=["GET"])
+def healthz():
+    return {"ok": True}
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
