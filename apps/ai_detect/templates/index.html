@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Detección de Objetos con YOLO</title>
+
+    <!-- Hace que todas las rutas relativas apunten a /ai-detect/ -->
+    <base href="/ai-detect/">
+
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -171,7 +175,8 @@
             const formData = new FormData();
             formData.append('file', file);
             
-            fetch('/upload', {
+            // IMPORTANTE: ruta relativa para que funcione bajo /ai-detect/
+            fetch('upload', {
                 method: 'POST',
                 body: formData
             })
