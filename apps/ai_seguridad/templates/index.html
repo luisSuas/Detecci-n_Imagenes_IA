@@ -1,0 +1,336 @@
+<!-- templates/index.html -->
+{% extends "base.html" %}
+
+{% block title %}Inicio{% endblock %}
+
+{% block content %}
+<div class="row mb-5">
+    <div class="col-12 text-center">
+        <h1 class="display-4 mb-3">AI Security System XJobs 🛡️</h1>
+        <p class="lead">Advanced security system to identify weapons, knives and other dangerous objects in real time</p>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Panel de imagen -->
+    <div class="col-md-6 mb-4">
+        <div class="card shadow-lg">
+            <div class="card-header bg-primary text-white">
+                <h2 class="h5 mb-0"><i class="bi bi-image me-2"></i>Image Analysis</h2>
+            </div>
+            <div class="card-body">
+                <form id="image-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">Select image:</label>
+                        <input class="form-control" type="file" name="file" accept="image/*" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-search me-2"></i>Analyze Image
+                    </button>
+                </form>
+                <div class="mt-4" id="image-result">
+                    <div class="text-center text-muted p-5 border rounded" id="image-placeholder">
+                        <i class="bi bi-card-image display-4 mb-3"></i>
+                        <p>Analysis by AI Security System XJobs appears here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel de video -->
+    <div class="col-md-6 mb-4">
+        <div class="card shadow-lg">
+            <div class="card-header bg-success text-white">
+                <h2 class="h5 mb-0"><i class="bi bi-camera-reels me-2"></i>Video Analysis</h2>
+            </div>
+            <div class="card-body">
+                <form id="video-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">Select video:</label>
+                        <input class="form-control" type="file" name="file" accept="video/*" required>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="bi bi-play-circle me-2"></i>Analyze Video
+                    </button>
+                </form>
+                <div class="mt-4" id="video-result">
+                    <div class="text-center text-muted p-5 border rounded" id="video-placeholder">
+                        <i class="bi bi-film display-4 mb-3"></i>
+                        <p>Analysis by AI Security System XJobs appears here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel de cámara -->
+    <div class="col-12">
+        <div class="card shadow-lg">
+            <div class="card-header bg-info text-white">
+                <h2 class="h5 mb-0"><i class="bi bi-camera-video me-2"></i>Real-Time Monitoring</h2>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p>Live monitoring with instant detection of dangerous objects. The system analyzes every frame in real time and displays visual alerts when it detects threats.</p>
+                        <ul>
+                            <li>Detection of weapons, knives and dangerous objects</li>
+                            <li>Real-time visual and audible alerts</li>
+                            <li>24/7 continuous monitoring</li>
+                            <li>Incident log</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <a href="/live" class="btn btn-info btn-lg">
+                            <i class="bi bi-play-fill me-2"></i>Start Monitoring
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Panel de estadísticas -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card shadow-lg">
+            <div class="card-header bg-warning text-dark">
+                <h2 class="h5 mb-0"><i class="bi bi-bar-chart me-2"></i>Detection Statistics</h2>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 text-center">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h3 class="card-title">128</h3>
+                                <p class="card-text">Total Detections</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h3 class="card-title">42</h3>
+                                <p class="card-text">Security Alerts</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h3 class="card-title">86%</h3>
+                                <p class="card-text">Precision</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h3 class="card-title">24/7</h3>
+                                <p class="card-text">Monitoring</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Manejar envío de imagen
+    document.getElementById('image-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const button = form.querySelector('button');
+        const originalButtonText = button.innerHTML;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';
+        button.disabled = true;
+        
+        try {
+            const formData = new FormData(form);
+            const response = await fetch('/upload/image', { 
+                method: 'POST', 
+                body: formData 
+            });
+            
+            if (!response.ok) {
+                throw new Error('Error in processing');
+            }
+            
+            const data = await response.json();
+            document.getElementById('image-placeholder').style.display = 'none';
+            
+            // Mostrar resultado con alerta si es necesario
+            let alertHtml = '';
+            if (data.danger_detected) {
+                alertHtml = `
+                    <div class="alert alert-danger d-flex align-items-center">
+                        <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
+                        <div>
+                            <h4 class="alert-heading">¡SECURITY ALERT!</h4>
+                            <p class="mb-0">They have been detected ${data.detected_objects.length} dangerous objects in the image</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                alertHtml = `
+                    <div class="alert alert-success d-flex align-items-center">
+                        <i class="bi bi-check-circle-fill fs-3 me-3"></i>
+                        <div>
+                            <h4 class="alert-heading">Safe area</h4>
+                            <p class="mb-0">No dangerous objects were detected in the image</p>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Construir lista de objetos detectados
+            let objectsHtml = '';
+            if (data.detected_objects.length > 0) {
+                objectsHtml = `
+                    <div class="card mt-3">
+                        <div class="card-header bg-light">
+                            <h3 class="h6 mb-0">Objetos Detectados</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Tipo</th>
+                                            <th>Confianza</th>
+                                            <th>Posición</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${data.detected_objects.map(obj => `
+                                            <tr>
+                                                <td>${obj.class}</td>
+                                                <td>${(obj.confidence * 100).toFixed(1)}%</td>
+                                                <td>(${obj.position.x1}, ${obj.position.y1}) a (${obj.position.x2}, ${obj.position.y2})</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            const resultHtml = `
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h3 class="h6 mb-0">Analysis by AI Security System XJobs</h3>
+                    </div>
+                    <div class="card-body">
+                        ${alertHtml}
+                        <div class="text-center mt-4">
+                            <img src="data:image/jpeg;base64,${data.image_base64}" class="img-fluid rounded shadow">
+                        </div>
+                        ${objectsHtml}
+                        <div class="mt-4 text-center">
+                            <a href="${data.image_url}" class="btn btn-primary" download>
+                                <i class="bi bi-download me-2"></i>Download Image
+                            </a>
+                            <button class="btn btn-outline-primary ms-2">
+                                <i class="bi bi-save me-2"></i>Save Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('image-result').innerHTML = resultHtml;
+            
+        } catch (error) {
+            alert('Error: ' + error.message);
+        } finally {
+            button.innerHTML = originalButtonText;
+            button.disabled = false;
+        }
+    });
+    
+    // Manejar envío de video
+    document.getElementById('video-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const button = form.querySelector('button');
+        const originalButtonText = button.innerHTML;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Procesando...';
+        button.disabled = true;
+        
+        try {
+            const formData = new FormData(form);
+            const response = await fetch('/upload/video', { 
+                method: 'POST', 
+                body: formData 
+            });
+            
+            if (!response.ok) {
+                throw new Error('Error en el procesamiento');
+            }
+            
+            const data = await response.json();
+            document.getElementById('video-placeholder').style.display = 'none';
+            
+            let alertHtml = '';
+            if (data.alert) {
+                alertHtml = `
+                    <div class="alert alert-danger d-flex align-items-center">
+                        <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
+                        <div>
+                            <h4 class="alert-heading">¡ALERTA DE SEGURIDAD!</h4>
+                            <p class="mb-0">Se detectaron objetos peligrosos en el video</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                alertHtml = `
+                    <div class="alert alert-success d-flex align-items-center">
+                        <i class="bi bi-check-circle-fill fs-3 me-3"></i>
+                        <div>
+                            <h4 class="alert-heading">Video seguro</h4>
+                            <p class="mb-0">No se detectaron objetos peligrosos en el video</p>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            const videoHtml = `
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h3 class="h6 mb-0">Video Procesado</h3>
+                    </div>
+                    <div class="card-body">
+                        ${alertHtml}
+                        <div class="ratio ratio-16x9 mt-4">
+                            <video controls class="w-100 rounded shadow">
+                                <source src="${data.processed_video}" type="video/mp4">
+                                Tu navegador no soporta videos HTML5.
+                            </video>
+                        </div>
+                        <div class="mt-4 text-center">
+                            <a href="${data.processed_video}" class="btn btn-success" download>
+                                <i class="bi bi-download me-2"></i>Descargar Video
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('video-result').innerHTML = videoHtml;
+        } catch (error) {
+            alert('Error: ' + error.message);
+        } finally {
+            button.innerHTML = originalButtonText;
+            button.disabled = false;
+        }
+    });
+</script>
+{% endblock %}

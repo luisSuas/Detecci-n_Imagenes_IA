@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Detección de Problemas</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --critical: #dc3545;
+            --high: #fd7e14;
+            --medium: #ffc107;
+            --low: #28a745;
+            --unknown: #6c757d;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; }
+        .upload-section { background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,.1); padding: 2rem; margin-bottom: 2rem; }
+        .result-container { background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,.1); padding: 1.5rem; margin-bottom: 2rem; }
+        .image-preview { border: 1px solid #dee2e6; border-radius: 5px; margin-bottom: 1rem; max-width: 100%; height: auto; }
+
+        .priority-box { border-left: 4px solid; padding-left: 1rem; margin-bottom: 1.5rem; }
+
+        .solution-item{
+            padding:.6rem .75rem;
+            margin-bottom:.5rem;
+            background-color:#e9ecef;
+            border:1px solid #dee2e6;
+            border-radius:6px;
+        }
+
+        .progress-container { display: none; margin: 1rem 0; }
+        .history-item { cursor: pointer; padding: .5rem; border-bottom: 1px solid #dee2e6; }
+        .history-item:hover { background-color: #f8f9fa; }
+
+        /* ====== Chat flotante ====== */
+        .chat-toggle-btn { position: fixed; right: 20px; bottom: 20px; z-index: 1050; }
+        .chat-panel {
+            position: fixed; right: 20px; bottom: 80px; width: 360px; max-width: 92vw; height: 520px; max-height: 78vh;
+            background: #fff; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.15); display: none; z-index: 1050; overflow: hidden; border: 1px solid #e5e7eb;
+        }
+        .chat-panel.open{ display:flex !important; flex-direction:column; }
+
+        .chat-header { 
+            padding: .6rem .8rem; background: #0d6efd; color: #fff; 
+            display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+            flex-wrap: nowrap;
+        }
+        .chat-header > div:first-child{
+            min-width: 0; 
+            flex: 1 1 auto; 
+            display:flex; 
+            flex-direction:column; 
+            justify-content:center;
+        }
+        .header-title{ font-weight: 700; line-height: 1; }
+        .vu-under-title{ margin: .20rem 0 .15rem 0; }
+        .chat-small{
+            font-size: .85rem; color: #e7f1ff; opacity: .95;
+            display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+        }
+        .chat-header .btn-group{ flex: 0 0 auto; gap: .4rem; flex-wrap: nowrap; align-items:center; }
+
+        .chat-body { padding: .75rem; flex: 1 1 auto; overflow-y: auto; background: #f8fafc; }
+
+        .chat-input { padding: .5rem; border-top: 1px solid #e5e7eb; background: #fff; flex: 0 0 auto; }
+        .bubble { max-width: 85%; padding: .5rem .75rem; border-radius: 12px; margin: .35rem 0; white-space: pre-wrap; word-wrap: break-word; line-height: 1.25rem; font-size: .95rem; }
+        .bubble.user { background: #0d6efd; color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+        .bubble.bot { background: #e9ecef; color: #111827; margin-right: auto; border-bottom-left-radius: 4px; }
+        .btn-voice { white-space: nowrap; }
+
+        .mic-badge { font-size: .75rem; }
+        #vuBar { width: 120px; height: 6px; background: #e9ecef; border-radius: 8px; overflow: hidden; }
+        #vuFill { height: 100%; width: 0%; background: linear-gradient(90deg,#20c997,#ffc107,#dc3545); transition: width .08s linear; }
+
+        .chat-header .btn{ padding: .25rem .5rem; line-height: 1.1; }
+    </style>
+</head>
+<body>
+    <div class="container py-4">
+        <div class="text-center mb-4">
+            <h1 class="display-4">Sistema de Detección de Problemas</h1>
+            <p class="lead">Identificación automática de fallas en infraestructura</p>
+        </div>
+
+        <div class="upload-section">
+            <h2 class="mb-3">Cargar Imagen</h2>
+            <div class="mb-3"><input class="form-control" type="file" id="fileInput" accept="image/*"></div>
+
+            <div class="mb-3">
+                <label for="userPrompt" class="form-label">¿Qué necesitas? (opcional)</label>
+                <input class="form-control" id="userPrompt" placeholder="ej. ¿qué hago para arreglar esto?">
+            </div>
+
+            <div class="d-flex gap-2">
+                <button id="uploadBtn" class="btn btn-primary" onclick="uploadImage()">
+                    <span id="uploadText">Analizar Imagen</span>
+                    <span id="uploadSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                </button>
+                <button class="btn btn-outline-secondary" id="btnReadSummary" onclick="readLastSummary()" disabled>🔊 Leer resumen</button>
+            </div>
+
+            <div id="progressContainer" class="progress-container">
+                <div class="progress"><div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div></div>
+                <small id="progressText" class="text-muted">Procesando imagen...</small>
+            </div>
+        </div>
+
+        <div id="results" class="d-none">
+            <div class="row">
+                <div class="col-md-6"><div class="result-container"><h3 class="mb-3">Imagen Original</h3><img id="originalImage" class="image-preview" src="" alt="Original"></div></div>
+                <div class="col-md-6"><div class="result-container"><h3 class="mb-3">Problemas Detectados</h3><img id="processedImage" class="image-preview" src="" alt="Procesada"></div></div>
+            </div>
+
+            <div class="result-container">
+                <h3 class="mb-3">Resumen de Inspección</h3>
+                <div class="row">
+                    <div class="col-md-4"><div class="card"><div class="card-body"><h5 class="card-title">Total de Problemas</h5><p class="card-text display-4" id="totalProblems">0</p></div></div></div>
+                    <div class="col-md-4"><div class="card"><div class="card-body"><h5 class="card-title">Confianza Promedio</h5><p class="card-text display-4" id="avgConfidence">0%</p></div></div></div>
+                    <div class="col-md-4"><div class="card"><div class="card-body"><h5 class="card-title">Prioridad</h5><p class="card-text display-4" id="globalPriority">N/A</p></div></div></div>
+                </div>
+            </div>
+
+            <div class="result-container">
+                <h3 class="mb-3">Reporte de Incidencia</h3>
+                <div id="maintenanceReport" class="priority-box">
+                    <h4 id="reportSummary">No se detectaron problemas</h4>
+                    <div id="reportPriority" class="mb-3"></div>
+                    <div id="keyIssue" class="mb-3"></div>
+                    <h5>Acciones Recomendadas:</h5>
+                    <div id="recommendedActions"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="result-container">
+            <h3 class="mb-3">Historial de Inspecciones</h3>
+            <div id="historyList" class="list-group"></div>
+        </div>
+    </div>
+
+    <!-- ====== Botón & Panel de Chat ====== -->
+    <button class="btn btn-primary chat-toggle-btn" id="chatToggle" onclick="toggleChat()">Asistente</button>
+
+    <div class="chat-panel" id="chatPanel" aria-hidden="true">
+        <div class="chat-header">
+            <div>
+                <div class="header-title">Asistente</div>
+                <div class="vu-under-title">
+                    <div id="vuBar" title="Nivel de micrófono"><div id="vuFill"></div></div>
+                </div>
+                <div class="chat-small" id="chatContext">Listo para ayudarte</div>
+            </div>
+            <div class="btn-group align-items-center">
+                <span id="micBadge" class="badge text-bg-secondary mic-badge me-2">Mic: inactivo</span>
+                <button class="btn btn-light btn-sm btn-voice" id="micBtn" onclick="toggleMic()">🎤 Hablar</button>
+                <button class="btn btn-light btn-sm" onclick="toggleChat()" title="Cerrar">✖</button>
+            </div>
+        </div>
+
+        <div class="chat-body" id="chatBody">
+            <div class="bubble bot">Hola 👋. Puedo darte un resumen, acciones, prioridad, urgencia, zona, el profesional recomendado, o el porcentaje de confianza del problema principal.</div>
+        </div>
+        <div class="chat-input">
+            <div class="input-group">
+                <input id="chatInput" type="text" class="form-control" placeholder="Escribe tu pregunta... (ej. ¿qué hago ahora?)" onkeydown="if(event.key==='Enter'){sendQuestion()}">
+                <button class="btn btn-outline-secondary" title="Leer la última respuesta" onclick="readLastAnswer()">🔊</button>
+                <button class="btn btn-primary" onclick="sendQuestion()">Enviar</button>
+            </div>
+        </div>
+    </div>
+
+    <audio id="botAudio"></audio>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // ===== Estado global =====
+        let lastFilename = null;
+        let lastSummaryTTS = "";
+        let lastSummaryIdPlayed = null;
+        let lastAnswerTTS = "";
+
+        // Anti-bucle TTS
+        let isSpeaking = false;
+        let lastTtsHash = null;
+
+        // STT (streaming)
+        let mediaRecorder = null;
+        let sttStreaming = false;
+        let sttSeq = 0;
+        let sttPartials = {};
+        let sttStream = null;
+        let sttAllChunks = [];
+        let sttSid = null;
+        let sttLiveMerged = "";
+
+        // WebAudio analyser (VU)
+        let audioCtx = null, analyser = null, sourceNode = null, rafId = null;
+
+        const micBadge = () => document.getElementById('micBadge');
+        const vuFill = () => document.getElementById('vuFill');
+
+        function setMicState(state) {
+            const el = micBadge(); if (!el) return;
+            if (state === 'on') { el.className = 'badge text-bg-success mic-badge me-2'; el.textContent = 'Mic: grabando'; }
+            else if (state === 'off') { el.className = 'badge text-bg-secondary mic-badge me-2'; el.textContent = 'Mic: inactivo'; }
+            else { el.className = 'badge text-bg-warning mic-badge me-2'; el.textContent = 'Mic: esperando'; }
+        }
+        function setVuLevel(pct){
+            const bar = vuFill(); if (bar) bar.style.width = Math.max(0, Math.min(100, pct|0)) + '%';
+        }
+
+        function startVu(stream){
+            try{
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 512;
+                sourceNode = audioCtx.createMediaStreamSource(stream);
+                sourceNode.connect(analyser);
+                const data = new Uint8Array(analyser.frequencyBinCount);
+                const draw = () => {
+                    analyser.getByteTimeDomainData(data);
+                    let sum=0; for(let i=0;i<data.length;i++){ const v=(data[i]-128)/128; sum+=v*v; }
+                    const rms = Math.sqrt(sum/data.length);
+                    setVuLevel(Math.round(rms*140));
+                    rafId = requestAnimationFrame(draw);
+                };
+                rafId = requestAnimationFrame(draw);
+            }catch(e){ console.warn('No se pudo iniciar VU meter:', e); }
+        }
+        function stopVu(){
+            try{
+                if (rafId) cancelAnimationFrame(rafId); rafId=null;
+                setVuLevel(0);
+                if (sourceNode) { try{sourceNode.disconnect();}catch(_){} sourceNode=null; }
+                if (analyser) { try{analyser.disconnect();}catch(_){} analyser=null; }
+                if (audioCtx) { try{audioCtx.close();}catch(_){} audioCtx=null; }
+            }catch(e){}
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (!window.isSecureContext && !isLocalhost) {
+                appendBubble("⚠️ Para usar el micrófono, abre esta página en HTTPS o en http://localhost.", "bot");
+            }
+            try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch {}
+            loadHistory();
+            setMicState('off'); setVuLevel(0);
+        });
+
+        function loadHistory() {
+            fetch('/history')
+                .then(async r => {
+                    if (!r.ok) throw new Error('HTTP '+r.status);
+                    return r.json();
+                })
+                .then(data => {
+                    const historyList = document.getElementById('historyList');
+                    historyList.innerHTML = '';
+                    if (data.history && data.history.length > 0) {
+                        data.history.forEach(item => {
+                            const el = document.createElement('div');
+                            el.className = 'history-item';
+                            el.innerHTML = `
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span>${item.timestamp.replace('_', ' ')}</span>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="inspectFile('${item.filename}')">Ver Detalles</button>
+                                </div>`;
+                            historyList.appendChild(el);
+                        });
+                    } else {
+                        historyList.innerHTML = '<div class="text-muted">No hay inspecciones previas</div>';
+                    }
+                })
+                .catch(err => console.error('Error al cargar historial:', err));
+        }
+
+        function hashText(t){ let h=0; for (let i=0;i<t.length;i++){ h=((h<<5)-h)+t.charCodeAt(i); h|=0;} return h; }
+        async function speak(text, voice="alloy") {
+            if (!text || isSpeaking) return;
+            const h = hashText(text); if (lastTtsHash !== null && lastTtsHash === h) return;
+            isSpeaking = true; lastTtsHash = h;
+            try {
+                const r = await fetch("/tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ text, voice })});
+                if (!r.ok){ isSpeaking=false; return; }
+                const blob = await r.blob(); const url = URL.createObjectURL(blob);
+                const audio = document.getElementById("botAudio");
+                audio.src = url;
+                audio.onended = audio.onpause = () => { isSpeaking=false; URL.revokeObjectURL(url); };
+                await audio.play();
+            } catch { isSpeaking=false; }
+        }
+        function readLastSummary(){ if(lastSummaryTTS) speak(lastSummaryTTS); }
+        function readLastAnswer(){ if(lastAnswerTTS) speak(lastAnswerTTS); }
+
+        function normalize(str){ return (str||"").toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+        function userWantsSilence(q){
+            const t = normalize(q);
+            return ['solo texto','sin voz','no hables','no hablar','no leer','silencio','callado','mute','solo en texto','texto nomas','texto nada mas'].some(p=>t.includes(p));
+        }
+
+        function updateInputFromPartials(){
+            const input = document.getElementById('chatInput');
+            if (sttLiveMerged && sttLiveMerged.trim()) {
+                input.value = sttLiveMerged.trim();
+                return;
+            }
+            const keys = Object.keys(sttPartials).map(n=>parseInt(n,10)).sort((a,b)=>a-b);
+            const text = keys.map(k => (sttPartials[k]||"").trim()).join(' ').replace(/\s+/g,' ').trim();
+            input.value = text;
+        }
+
+        function safeUUID(){
+            if (window.crypto && window.crypto.randomUUID) return crypto.randomUUID();
+            return `${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+        }
+
+        // ====== STT chunk con manejo de no-JSON / 5xx ======
+        async function sendChunk(blob, seq){
+            try {
+                if (!blob || !blob.size || blob.size < 800) return;
+                const fd = new FormData();
+                fd.append("audio", blob, `chunk_${seq}.webm`);
+                fd.append("seq", String(seq));
+                if (sttSid) fd.append("sid", sttSid);
+
+                const r = await fetch("/stt_chunk", { method: "POST", body: fd });
+                if (!r.ok) {
+                    console.warn("stt_chunk no-ok", r.status);
+                    return; // ignorar este chunk y seguir
+                }
+                const data = await r.json();
+                console.log("STT partial", { seq, size: blob.size, data });
+
+                if (!sttStreaming || !sttSid) return;
+                if (data && data.sid && data.sid !== sttSid) return;
+
+                if (data && data.partial != null && data.seq != null) {
+                    sttPartials[data.seq] = data.partial;
+                }
+                if (data && typeof data.merged === "string" && data.merged.trim()) {
+                    sttLiveMerged = data.merged.trim();
+                    const input = document.getElementById('chatInput');
+                    input.value = sttLiveMerged;
+                } else {
+                    updateInputFromPartials();
+                }
+            } catch (e) { console.error("Error enviando chunk:", e); }
+        }
+
+        async function toggleMic(){
+            const btn = document.getElementById('micBtn');
+            const chatInput = document.getElementById('chatInput');
+
+            if (!sttStreaming) {
+                try {
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        appendBubble("⚠️ Tu navegador no soporta micrófono (MediaRecorder). Usa Chrome/Edge o HTTPS.", "bot");
+                        return;
+                    }
+                    sttStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                    let options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 96000 };
+                    if (!('MediaRecorder' in window)) { appendBubble("⚠️ MediaRecorder no disponible en este navegador.", "bot"); return; }
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options = { mimeType: 'audio/webm', audioBitsPerSecond: 96000 };
+                        if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { audioBitsPerSecond: 96000 };
+                    }
+                    mediaRecorder = new MediaRecorder(sttStream, options);
+
+                    sttStreaming = true; sttSeq = 0; sttPartials = {}; sttAllChunks = [];
+                    sttLiveMerged = "";
+                    sttSid = safeUUID();
+                    chatInput.value = "";
+                    btn.textContent = "⏹️ Detener"; setMicState('on');
+                    appendBubble("Escuchando... (dictado en tiempo real). Pulsa Detener para enviar.", "bot");
+                    startVu(sttStream);
+
+                    mediaRecorder.ondataavailable = (e) => {
+                        if (!sttStreaming) return;
+                        if (e.data && e.data.size > 0) {
+                            sttAllChunks.push(e.data);
+                            sendChunk(e.data, sttSeq++);
+                        }
+                    };
+                    mediaRecorder.onerror = (err) => { console.error('MediaRecorder error:', err); appendBubble("⚠️ Ocurrió un error con el micrófono.", "bot"); };
+                    mediaRecorder.onstop = async () => {
+                        try { if (sttStream) { sttStream.getTracks().forEach(t => t.stop()); sttStream = null; } } catch(e){}
+                        stopVu();
+                        sttStreaming = false; btn.textContent = "🎤 Hablar"; setMicState('off');
+
+                        updateInputFromPartials();
+                        let finalQ = (chatInput.value || "").trim();
+
+                        try {
+                            if (sttAllChunks.length) {
+                                const fullBlob = new Blob(sttAllChunks, { type: mediaRecorder.mimeType || 'audio/webm;codecs=opus' });
+                                const fd = new FormData();
+                                fd.append("audio", fullBlob, "full.webm");
+                                if (sttSid) fd.append("sid", sttSid);
+                                const resp = await fetch("/stt", { method: "POST", body: fd });
+
+                                if (resp.ok) {
+                                    const j = await resp.json();
+                                    if (j && j.sid && sttSid && j.sid !== sttSid) {
+                                        console.debug("STT final ignorado por sid desigual", j.sid, sttSid);
+                                    } else if (j && j.text && j.text.trim()) {
+                                        finalQ = j.text.trim();
+                                        chatInput.value = finalQ;
+                                    }
+                                } else {
+                                    console.warn("stt final no-ok", resp.status);
+                                }
+                            }
+                        } catch(e){ console.warn("Pasada final STT falló:", e); }
+
+                        if (!finalQ) {
+                            appendBubble("No pude transcribir el audio (verifica que el VU se mueva y habla cerca del micro).", "bot"); 
+                            try{ if (sttSid) await fetch('/stt_close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid: sttSid})}); }catch(_){}
+                            sttPartials = {}; sttAllChunks = []; sttLiveMerged = "";
+                            sttSid = null;
+                            return; 
+                        }
+
+                        ensureChatOpen();
+                        appendBubble(finalQ, "user");
+                        appendThinkingBubble();
+                        await askWithText(finalQ);
+                        chatInput.value = "";
+
+                        try{ if (sttSid) await fetch('/stt_close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid: sttSid})}); }catch(_){}
+                        sttPartials = {}; sttAllChunks = []; sttLiveMerged = "";
+                        sttSid = null;
+                    };
+
+                    mediaRecorder.start(2000);
+                } catch (e) {
+                    if (e && e.name === 'NotAllowedError') appendBubble("⚠️ Permiso de micrófono denegado. Actívalo en el candado de la barra de direcciones.", "bot");
+                    else if (e && e.name === 'NotFoundError') appendBubble("⚠️ No se encontró ningún micrófono.", "bot");
+                    else appendBubble("⚠️ No se pudo acceder al micrófono.", "bot");
+                    setMicState('off'); stopVu();
+                }
+            } else {
+                try { mediaRecorder && mediaRecorder.stop(); } catch(e){ console.error(e); }
+            }
+        }
+
+        function uploadImage() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const userPromptEl = document.getElementById('userPrompt');
+            const userPrompt = (userPromptEl?.value || '').trim();
+            if (!file) { alert('Por favor selecciona una imagen para analizar'); return; }
+
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadText = document.getElementById('uploadText');
+            const uploadSpinner = document.getElementById('uploadSpinner');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+
+            uploadText.textContent = 'Procesando...';
+            uploadSpinner.classList.remove('d-none');
+            uploadBtn.disabled = true;
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '30%';
+            progressText.textContent = 'Subiendo imagen...';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload', { method: 'POST', body: formData })
+            .then(async r => {
+                progressBar.style.width = '70%';
+                progressText.textContent = 'Analizando problemas...';
+                if (!r.ok) throw new Error('HTTP '+r.status);
+                return r.json();
+            })
+            .then(async data => {
+                progressBar.style.width = '100%';
+                progressText.textContent = 'Completado!';
+                if (data.error) { alert(`Error: ${data.error}`); reset(); return; }
+
+                displayResults(data);
+                loadHistory();
+
+                lastSummaryTTS = data.summary_tts_text || "";
+                const thisSummaryId = data.summary_tts_id || "";
+                document.getElementById('btnReadSummary').disabled = !lastSummaryTTS;
+                if (!userPrompt && lastSummaryTTS && thisSummaryId && thisSummaryId !== lastSummaryIdPlayed) {
+                    lastSummaryIdPlayed = thisSummaryId;
+                    speak(lastSummaryTTS);
+                }
+
+                if (userPrompt) {
+                    ensureChatOpen();
+                    appendBubble(userPrompt, 'user');
+                    appendThinkingBubble();
+                    try { await askWithText(userPrompt); } catch(e){ console.error('No se pudo consultar al asistente:', e); }
+                    userPromptEl.value = '';
+                }
+
+                reset();
+            })
+            .catch(err => { console.error('Error en /upload:', err); alert('Ocurrió un error al procesar la imagen'); reset(); });
+
+            function reset() {
+                uploadText.textContent = 'Analizar Imagen';
+                uploadSpinner.classList.add('d-none');
+                uploadBtn.disabled = false;
+                setTimeout(() => { progressContainer.style.display = 'none'; progressBar.style.width = '0%'; }, 1200);
+            }
+        }
+
+        function inspectFile(filename) {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '50%';
+            progressText.textContent = 'Cargando inspección...';
+
+            fetch(`/inspect/${encodeURIComponent(filename)}`)
+            .then(async r => {
+                if (!r.ok) throw new Error('HTTP '+r.status);
+                return r.json();
+            })
+            .then(data => {
+                progressBar.style.width = '100%';
+                progressText.textContent = 'Completado!';
+                if (data.error) { alert(`Error: ${data.error}`); return; }
+                displayResults(data);
+
+                lastSummaryTTS = data.summary_tts_text || "";
+                document.getElementById('btnReadSummary').disabled = !lastSummaryTTS;
+
+                setTimeout(() => { progressContainer.style.display = 'none'; progressBar.style.width = '0%'; }, 800);
+            })
+            .catch(err => { console.error('Error en /inspect:', err); alert('Ocurrió un error al cargar la inspección'); progressContainer.style.display = 'none'; });
+        }
+
+        function displayResults(data) {
+            document.getElementById('results').classList.remove('d-none');
+            document.getElementById('originalImage').src = data.original_image;
+            document.getElementById('processedImage').src = data.processed_image;
+            lastFilename = data.filename || null;
+
+            document.getElementById('totalProblems').textContent = data.analysis.total_problems;
+            document.getElementById('avgConfidence').textContent = `${(data.analysis.average_confidence * 100).toFixed(1)}%`;
+
+            const r = data.resumen_inspeccion || {};
+            const prioridadGlobal = (r.prioridad_global || (data.maintenance_report?.priority || 'baja')).toLowerCase();
+            const urgenciaGlobal  =  r.urgencia_global  || (data.maintenance_report?.urgency  || 'programada');
+            const totalDet        =  r.detecciones ?? data.analysis.total_problems;
+            const zonaTexto       =  r.lugar || r.zona || data.maintenance_report?.zone || 'No especificada';
+
+            const globalPriority = document.getElementById('globalPriority');
+            globalPriority.textContent = prioridadGlobal.toUpperCase();
+            globalPriority.className = `text-${getPriorityClass(prioridadGlobal)}`;
+
+            const reportPriority = document.getElementById('reportPriority');
+            reportPriority.innerHTML = `
+                <strong>Prioridad:</strong>
+                <span class="badge bg-${getPriorityClass(prioridadGlobal)}">${prioridadGlobal.toUpperCase()}</span>
+                <span class="ms-2"><strong>Urgencia:</strong> ${urgenciaGlobal}</span>
+                <span class="ms-2"><strong>Zona:</strong> ${zonaTexto}</span>
+            `;
+            document.getElementById('reportSummary').textContent =
+                `Inspección detectó ${totalDet} problema${totalDet===1?'':'s'} (${prioridadGlobal}).`;
+
+            const keyIssueEl = document.getElementById('keyIssue');
+            function prioRank(p){ const m={ 'crítica':4,'critica':4,'alta':3,'media':2,'baja':1 }; return m[(p||'').toLowerCase()]||0; }
+            let top=null;
+            if (Array.isArray(data.reporte_incidencia) && data.reporte_incidencia.length) {
+                top = data.reporte_incidencia.slice().sort((a,b)=> prioRank(b.prioridad)-prioRank(a.prioridad) || (b.confianza||0)-(a.confianza||0))[0];
+            } else if (Array.isArray(data.detections) && data.detections.length) {
+                const d = data.detections.slice().sort((a,b)=> b.confidence - a.confidence)[0];
+                top = { problema:(d.class||'').replace(/_/g,' '), confianza:(d.confidence||0)*100, prioridad:d.severity||'', descripcion:d.description||'' };
+            }
+            if (top) {
+                const nombre = (top.problema||'').toString().replace(/_/g,' ').toUpperCase();
+                const pct = (top.confianza||0).toFixed(1);
+                keyIssueEl.innerHTML = `<h5 class="mb-1">${nombre} (${pct}%)</h5><p class="mb-0">${top.descripcion || 'Incidencia detectada.'}</p>`;
+            } else keyIssueEl.innerHTML = '';
+
+            const acciones = r.acciones_recomendadas_globales || data.maintenance_report?.recommended_actions || [];
+            const recommendedActions = document.getElementById('recommendedActions');
+            recommendedActions.innerHTML = '';
+            if (acciones.length > 0) acciones.forEach(a => {
+                const div=document.createElement('div');
+                div.className='solution-item';
+                div.textContent=a;
+                recommendedActions.appendChild(div);
+            });
+            else recommendedActions.innerHTML = '<div class="text-muted">No se requieren acciones</div>';
+
+            document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+            const chatContext = document.getElementById('chatContext');
+            chatContext.textContent = `Contexto: ${r.lugar || 'N/D'} · ${(r.prioridad_global || 'baja').toUpperCase()}`;
+        }
+
+        function getPriorityClass(priority) {
+            const p = (priority || '').toLowerCase();
+            const map = { 'crítica':'danger','critica':'danger','alta':'warning','media':'info','baja':'success','ninguna':'secondary' };
+            return map[p] || 'secondary';
+        }
+
+        function toggleChat() {
+            const panel = document.getElementById('chatPanel');
+            const isOpen = panel.classList.contains('open');
+            if (isOpen) {
+                panel.classList.remove('open');
+                panel.setAttribute('aria-hidden','true');
+            } else {
+                panel.classList.add('open');
+                panel.setAttribute('aria-hidden','false');
+                setTimeout(() => { scrollChatToEnd(); document.getElementById('chatInput').focus(); }, 50);
+            }
+        }
+        function ensureChatOpen() {
+            const panel = document.getElementById('chatPanel');
+            if (!panel.classList.contains('open')) toggleChat();
+        }
+
+        function appendBubble(text, who='bot') {
+            const body = document.getElementById('chatBody');
+            const div = document.createElement('div');
+            div.className = `bubble ${who}`;
+            div.textContent = text;
+            body.appendChild(div);
+            scrollChatToEnd();
+        }
+        function scrollChatToEnd() {
+            const body = document.getElementById('chatBody');
+            body.scrollTop = body.scrollHeight;
+        }
+        function openAssistantWith(userText, botText, resumen) {
+            const chatContext = document.getElementById('chatContext');
+            chatContext.textContent = `Contexto: ${(resumen?.lugar) || 'N/D'} · ${((resumen?.prioridad_global) || 'baja').toUpperCase()}`;
+            ensureChatOpen();
+            if (userText) appendBubble(userText, 'user');
+            if (botText) { appendBubble(botText, 'bot'); }
+        }
+
+        // ====== utilidades de placeholder "Pensando…" ======
+        function appendThinkingBubble(){
+            const body = document.getElementById('chatBody');
+            const div = document.createElement('div');
+            div.className = 'bubble bot thinking';
+            div.textContent = 'Pensando…';
+            body.appendChild(div);
+            scrollChatToEnd();
+            return div;
+        }
+        function replaceThinkingBubble(who, text){
+            const body = document.getElementById('chatBody');
+            const nodes = [...body.querySelectorAll('.bubble.thinking')];
+            const target = nodes.pop();
+            if (target) {
+                target.classList.remove('thinking');
+                target.textContent = text;
+            } else {
+                appendBubble(text, who);
+            }
+        }
+
+        // ====== /ask con reintentos y control de 502/no-JSON ======
+        async function askWithText(q){
+            const speakWanted = !userWantsSilence(q);
+            const payload = { q, speak: speakWanted };
+            if (lastFilename) payload.filename = lastFilename;
+
+            let data = null, errorFinal = null;
+            for (let i=0;i<3;i++){
+                try{
+                    const res = await fetch('/ask', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) throw new Error('HTTP '+res.status);
+                    const ct = res.headers.get('content-type') || '';
+                    if (!ct.includes('application/json')) throw new Error('Non-JSON response');
+                    data = await res.json();
+                    break;
+                }catch(e){
+                    errorFinal = e;
+                    await new Promise(r => setTimeout(r, i===0 ? 600 : 1000));
+                }
+            }
+
+            if (!data) {
+                replaceThinkingBubble('bot','Servidor ocupado. Intenta de nuevo en unos segundos.');
+                console.error('ask error', errorFinal);
+                return;
+            }
+
+            if (data.error) {
+                replaceThinkingBubble('bot', `Error: ${data.error}`);
+            } else {
+                replaceThinkingBubble('bot', data.answer || 'Listo.');
+                lastAnswerTTS = speakWanted ? (data.tts_text || data.answer || '') : '';
+                if (lastAnswerTTS) speak(lastAnswerTTS);
+            }
+        }
+
+        async function sendQuestion() {
+            const input = document.getElementById('chatInput');
+            const q = (input.value || '').trim();
+            if (!q) return;
+            ensureChatOpen();
+            appendBubble(q, 'user');
+            appendThinkingBubble();
+            input.value = '';
+            await askWithText(q);
+        }
+    </script>
+</body>
+</html>

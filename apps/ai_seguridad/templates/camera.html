@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+
+{% block title %}Cámara en Vivo{% endblock %}
+
+{% block head %}
+<style>
+    #video-container {
+        position: relative;
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    
+    #video-feed {
+        width: 100%;
+        border-radius: 10px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        background: #000;
+    }
+    
+    .alert-mode {
+        border: 3px solid #dc3545;
+        animation: alert-pulse 0.5s infinite alternate;
+    }
+    
+    @keyframes alert-pulse {
+        from { box-shadow: 0 0 5px #dc3545; }
+        to { box-shadow: 0 0 30px #dc3545; }
+    }
+    
+    #alert-indicator {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        right: 20px;
+        z-index: 10;
+        display: none;
+    }
+    
+    #controls {
+        max-width: 800px;
+        margin: 20px auto 0;
+    }
+    
+    .camera-selector {
+        margin-bottom: 20px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    
+    .log-container {
+        max-width: 800px;
+        margin: 30px auto 0;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+    
+    .log-entry {
+        padding: 10px 15px;
+        margin-bottom: 8px;
+        border-radius: 5px;
+        font-size: 0.9rem;
+    }
+    
+    .log-alert {
+        background-color: #f8d7da;
+        border-left: 4px solid #dc3545;
+    }
+    
+    .log-info {
+        background-color: #e2e3e5;
+        border-left: 4px solid #6c757d;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 text-center mb-4">
+        <h1 class="display-5">Monitoreo en Tiempo Real</h1>
+        <p class="lead">Detección instantánea de objetos peligrosos</p>
+    </div>
+    
+    <div class="camera-selector">
+        <select id="camera-select" class="form-select">
+            <option value="0">Cámara Local</option>
+            <option value="1">Cámara 1</option>
+            <option value="2">Cámara 2</option>
+            <option value="3">Cámara 3</option>
+            <option value="4">Cámara 4</option>
+            <option value="5">Cámara 5</option>
+            <option value="6">Cámara 6</option>
+            <option value="7">Cámara 7</option>
+            <option value="8">Cámara 8</option>
+            <option value="9">Cámara 9</option>
+            <option value="10">Cámara 10</option>
+        </select>
+        <button id="switch-camera-btn" class="btn btn-primary">
+            <i class="bi bi-camera-video me-2"></i>Cambiar Cámara
+        </button>
+    </div>
+    
+    <div id="video-container">
+        <div class="alert alert-danger text-center" id="alert-indicator">
+            <strong><i class="bi bi-exclamation-triangle-fill me-2"></i>¡ALERTA!</strong> Objeto peligroso detectado
+        </div>
+        <img id="video-feed">
+    </div>
+    
+    <div id="controls" class="d-flex justify-content-center gap-3 mt-4">
+        <button onclick="location.href='/'" class="btn btn-secondary">
+            <i class="bi bi-arrow-left me-2"></i>Volver
+        </button>
+        <button id="pause-btn" class="btn btn-warning">
+            <i class="bi bi-pause me-2"></i>Pausar
+        </button>
+        <button onclick="location.reload()" class="btn btn-danger">
+            <i class="bi bi-arrow-clockwise me-2"></i>Reiniciar
+        </button>
+        <button id="snapshot-btn" class="btn btn-info">
+            <i class="bi bi-camera me-2"></i>Capturar
+        </button>
+    </div>
+    
+    <div class="log-container mt-4">
+        <h5 class="mb-3"><i class="bi bi-list-check me-2"></i>Registro de Eventos</h5>
+        <div id="event-log">
+            <div class="log-entry log-info">
+                <i class="bi bi-info-circle me-2"></i>Sistema iniciado - Monitoreo activo
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const video = document.getElementById('video-feed');
+    const alertIndicator = document.getElementById('alert-indicator');
+    const pauseBtn = document.getElementById('pause-btn');
+    const snapshotBtn = document.getElementById('snapshot-btn');
+    const switchBtn = document.getElementById('switch-camera-btn');
+    const cameraSelect = document.getElementById('camera-select');
+    const eventLog = document.getElementById('event-log');
+    
+    let websocket;
+    let isPaused = false;
+    let alertActive = false;
+    let lastAlertTime = 0;
+    let currentCameraId = 0;
+    
+    // Conectar a WebSocket
+    function connectWebSocket(cameraId) {
+        // Cerrar conexión anterior si existe
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+            websocket.close();
+        }
+        
+        currentCameraId = cameraId;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        websocket = new WebSocket(`${protocol}//${window.location.host}/ws/${cameraId}`);
+        
+        websocket.onopen = () => {
+            addLog(`Cámara ${cameraId} conectada`, "info");
+        };
+        
+        websocket.onmessage = (event) => {
+            if (isPaused) return;
+            
+            const blob = new Blob([event.data], {type: 'image/jpeg'});
+            video.src = URL.createObjectURL(blob);
+            
+            // Detectar alertas (simplificado)
+            if (!alertActive && hasRedColor(event.data)) {
+                showAlert();
+            }
+        };
+        
+        websocket.onclose = () => {
+            addLog(`Cámara ${cameraId} desconectada`, "warning");
+            setTimeout(() => connectWebSocket(cameraId), 2000);
+        };
+        
+        websocket.onerror = (error) => {
+            addLog(`Error en cámara ${cameraId}: ${error.message}`, "alert");
+        };
+    }
+    
+    // Comprobar si hay alertas
+    function hasRedColor(data) {
+        const textDecoder = new TextDecoder();
+        const text = textDecoder.decode(data);
+        return text.includes("ALERTA");
+    }
+    
+    // Mostrar alerta
+    function showAlert() {
+        const now = Date.now();
+        // Prevenir alertas demasiado frecuentes
+        if (now - lastAlertTime < 5000) return;
+        
+        lastAlertTime = now;
+        alertActive = true;
+        video.classList.add('alert-mode');
+        alertIndicator.style.display = 'block';
+        
+        // Sonido de alerta
+        try {
+            const audio = new Audio("https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3");
+            audio.play();
+        } catch (e) {
+            console.log("Error al reproducir sonido:", e);
+        }
+        
+        // Añadir al registro
+        addLog(`¡Alerta en Cámara ${currentCameraId}! Objeto peligroso detectado`, "alert");
+        
+        setTimeout(() => {
+            alertActive = false;
+            video.classList.remove('alert-mode');
+            alertIndicator.style.display = 'none';
+        }, 3000);
+    }
+    
+    // Añadir entrada al registro
+    function addLog(message, type) {
+        const logEntry = document.createElement('div');
+        logEntry.className = `log-entry log-${type}`;
+        logEntry.innerHTML = `
+            <i class="bi ${type === 'alert' ? 'bi-exclamation-triangle' : 'bi-info-circle'} me-2"></i>
+            ${new Date().toLocaleTimeString()} - ${message}
+        `;
+        eventLog.prepend(logEntry);
+        
+        // Mantener un máximo de 10 entradas
+        if (eventLog.children.length > 10) {
+            eventLog.removeChild(eventLog.lastChild);
+        }
+    }
+    
+    // Botón de pausa
+    pauseBtn.addEventListener('click', () => {
+        isPaused = !isPaused;
+        if (isPaused) {
+            pauseBtn.innerHTML = '<i class="bi bi-play me-2"></i>Reanudar';
+            pauseBtn.classList.remove('btn-warning');
+            pauseBtn.classList.add('btn-success');
+            addLog("Monitoreo pausado", "info");
+        } else {
+            pauseBtn.innerHTML = '<i class="bi bi-pause me-2"></i>Pausar';
+            pauseBtn.classList.remove('btn-success');
+            pauseBtn.classList.add('btn-warning');
+            addLog("Monitoreo reanudado", "info");
+        }
+    });
+    
+    // Botón de captura
+    snapshotBtn.addEventListener('click', () => {
+        if (video.src) {
+            const link = document.createElement('a');
+            link.href = video.src;
+            link.download = `captura-cam${currentCameraId}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            addLog(`Captura de Cámara ${currentCameraId} guardada`, "info");
+        }
+    });
+    
+    // Botón para cambiar de cámara
+    switchBtn.addEventListener('click', () => {
+        const newCameraId = parseInt(cameraSelect.value);
+        if (newCameraId !== currentCameraId) {
+            addLog(`Cambiando a Cámara ${newCameraId}`, "info");
+            connectWebSocket(newCameraId);
+        }
+    });
+    
+    // Iniciar conexión con la cámara local por defecto
+    document.addEventListener('DOMContentLoaded', () => {
+        connectWebSocket(0);
+    });
+</script>
+{% endblock %}

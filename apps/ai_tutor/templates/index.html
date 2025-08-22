@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="static\icon/favicon.ico">
+    <title>AI Tutor 🤖 x-Jobs</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+    <link href="/static/css/neumorphism.css" rel="stylesheet">
+</head>
+<body>
+    <div class="ai-container">
+        <div class="ai-header">
+            <div class="ai-pulse"></div>
+            <h1>AI Tutor 🤖 x-Jobs</h1>
+            <p>Asistente de aprendizaje inteligente</p>
+        </div>
+        
+        <div class="ai-chat-container">
+            <div id="chat-display" class="ai-chat-display"></div>
+            
+            <div class="ai-input-group">
+                <div class="voice-controls">
+                    <button id="voice-btn" class="ai-btn voice-btn">
+                        <span class="pulse-animation"></span>
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <div id="voice-status">Presiona para hablar</div>
+                </div>
+                
+                <input type="text" id="user-input" placeholder="Escribe tu pregunta...">
+                <button id="send-btn" class="ai-btn send-btn">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+        
+        <div class="ai-status">
+            <div class="ai-wave"></div>
+            <div id="status-text">Conectado - Listo para aprender</div>
+        </div>
+    </div>
+
+    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <script src="/static/js/voice.js"></script>
+    <script src="/static/js/chat.js"></script>
+</body>
+</html>
