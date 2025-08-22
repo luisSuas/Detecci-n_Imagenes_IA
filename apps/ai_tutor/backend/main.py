@@ -5,13 +5,15 @@ import os
 import uuid
 from pathlib import Path
 
-# Imports robustos (funciona dentro del paquete o ejecutando directo)
+# ✅ Imports correctos: este archivo vive en apps/ai_tutor/backend/
+# Antes: .backend.agents...  (eso rompía en Render)
 try:
-    from .backend.agents.tutor_agent import TutorAgent
-    from .backend.utils.voice_processor import VoiceProcessor
+    from .agents.tutor_agent import TutorAgent
+    from .utils.voice_processor import VoiceProcessor
 except Exception:
-    from backend.agents.tutor_agent import TutorAgent
-    from backend.utils.voice_processor import VoiceProcessor
+    # Fallback por si se ejecuta como módulo suelto
+    from agents.tutor_agent import TutorAgent
+    from utils.voice_processor import VoiceProcessor
 
 app = FastAPI(title="Tutor AI Futurista")
 

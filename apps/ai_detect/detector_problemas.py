@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import os
 import logging
 from datetime import datetime
+from pathlib import Path  # ⟵ NUEVO
 
 # ==== Mapas y reglas para “sentido común” ====
 ALIASES = {
@@ -68,7 +69,7 @@ ZONA_KEYWORDS = {
     "pasillo": "Pasillo",
     "banio": "Baño",
     "baño": "Baño",
-    "baño": "Baño",  # por si viene con ñ combinada
+    "baño": "Baño",
     "techo": "Techo / Cubierta",
     "azotea": "Azotea",
     "estacionamiento": "Estacionamiento",
@@ -87,10 +88,10 @@ class ProblemDetector:
         self.model = None
         self.class_names = {}
         self.problem_descriptions = {}
-        
+
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
-        
+
         try:
             self._setup_problem_descriptions()
             self._load_model(model_path)
@@ -101,37 +102,62 @@ class ProblemDetector:
 
     # ----------------- Carga del modelo -----------------
     def _load_model(self, model_path=None):
-        """Carga el modelo con múltiples alternativas y verificación"""
-        model_options = [
-            model_path,
-            'modelos/problemas_infraestructura.pt',
-            'yolov8n.pt',
-            'yolov8s.pt'
+        """
+        Carga el modelo con alternativas y verificación.
+        Ahora usa rutas ABSOLUTAS basadas en este archivo (apps/ai_detect/...).
+        """
+        base_dir = Path(__file__).resolve().parent  # apps/ai_detect
+        # Permite override por variable de entorno
+        env_path = os.getenv("AI_DETECT_MODEL") or os.getenv("MODEL_PATH")
+
+        # Normaliza a Path si viene str; ignora None.
+        def _p(x):
+            if not x:
+                return None
+            x = Path(x)
+            # Si es relativo, inténtalo relativo a este archivo y al cwd
+            return x if x.is_absolute() else (base_dir / x)
+
+        candidates = [
+            _p(model_path),
+            _p(env_path),
+            base_dir / "modelos" / "problemas_infraestructura.pt",     # ⟵ tu modelo real
+            base_dir / "yolov8n.pt",
+            base_dir / "yolov8s.pt",
+            # Por si el cwd es el repo raíz
+            Path("apps/ai_detect/modelos/problemas_infraestructura.pt"),
+            Path("modelos/problemas_infraestructura.pt"),
         ]
-        
-        loaded = False
-        for model_option in model_options:
-            if not model_option:
+
+        tried = []
+        for cand in candidates:
+            if not cand:
                 continue
+            cand = cand.resolve()
+            tried.append(str(cand))
             try:
-                if not os.path.exists(model_option):
-                    self.logger.warning(f"Modelo no encontrado: {model_option}")
+                if not cand.exists():
+                    self.logger.warning(f"Modelo no encontrado: {cand}")
                     continue
-                if os.path.getsize(model_option) < 1024 * 1024:
-                    self.logger.warning(f"Modelo demasiado pequeño: {model_option}")
+                if cand.stat().st_size < 1024 * 1024:  # <1MB probablemente no es un .pt válido
+                    self.logger.warning(f"Modelo demasiado pequeño: {cand}")
                     continue
-                self.model = YOLO(model_option)
+
+                self.model = YOLO(str(cand))
                 self.class_names = self.model.names
-                self.logger.info(f"Modelo cargado exitosamente: {model_option}")
+                self.logger.info(f"Modelo cargado exitosamente: {cand}")
                 self.logger.info(f"📦 Clases del modelo: {self.class_names}")
-                loaded = True
-                break
+                return
             except Exception as e:
-                self.logger.error(f"Error al cargar {model_option}: {str(e)}")
+                self.logger.error(f"Error al cargar {cand}: {e}")
                 continue
-        
-        if not loaded:
-            raise RuntimeError("No se pudo cargar ningún modelo YOLO válido")
+
+        # Si llegó aquí, no se cargó
+        msg = (
+            "No se pudo cargar ningún modelo YOLO válido.\n"
+            "Rutas intentadas:\n- " + "\n- ".join(tried)
+        )
+        raise RuntimeError(msg)
 
     # ----------------- Catálogo base (sin duplicados) -----------------
     def _setup_problem_descriptions(self):
@@ -331,15 +357,14 @@ class ProblemDetector:
             if "filtracion_pared" in classes:
                 my = mean_y_for("filtracion_pared")
                 if my is not None:
-                    if my < 0.33:  # parte alta
+                    if my < 0.33:
                         return "Pared (parte alta)"
-                    elif my > 0.66:  # parte baja
+                    elif my > 0.66:
                         return "Pared (parte baja)"
                 return "Pared interior"
 
             if "tuberia_rota" in classes:
                 my = mean_y_for("tuberia_rota")
-                # Si además vemos equipo oxidado/cable expuesto → zona técnica
                 if "equipo_oxidado" in classes or "cable_expuesto" in classes:
                     return "Zona técnica (cercana a instalaciones)"
                 if my is not None:
@@ -391,7 +416,6 @@ class ProblemDetector:
             "detecciones": len(detections)
         }
 
-        # Conteo por clase para modular descripciones (múltiples focos)
         counts = {}
         for d in detections:
             cls = self._norm_cls(d.get("name") or d.get("class"))
@@ -406,8 +430,8 @@ class ProblemDetector:
 
             reporte.append({
                 "problema": cls,
-                "descripcion": desc,                           # << dinámica
-                "confianza": round(conf * 100, 1),             # 0-100 para UI
+                "descripcion": desc,
+                "confianza": round(conf * 100, 1),
                 "prioridad": prioridad,
                 "urgencia": urgencia,
                 "concepto_dano": CONCEPTOS.get(cls, "Incidencia por confirmar"),
@@ -433,7 +457,6 @@ class ProblemDetector:
             "solucion": solucion
         }
 
-        # prioridad/urgencia global + acciones globales (para card superior)
         if reporte:
             top = max(reporte, key=lambda x: PRIO_RANK[x["prioridad"]])
             payload["resumen_inspeccion"]["prioridad_global"] = top["prioridad"]
@@ -458,15 +481,15 @@ class ProblemDetector:
         """Detección principal con manejo de errores robusto. 'zona' es opcional."""
         if not os.path.exists(image_path):
             return {'error': 'La imagen no existe en la ruta especificada'}
-        
+
         try:
             img = cv2.imread(image_path)
             if img is None:
                 return {'error': 'No se pudo leer la imagen, formato posiblemente no soportado'}
-            
+
             results = self.model(img)
             names = getattr(self.model, "names", {})
-            
+
             detections = []
             for result in results:
                 for box in result.boxes:
@@ -477,21 +500,19 @@ class ProblemDetector:
                         class_name_raw = names.get(cls_id, str(cls_id))
                         class_name = self._norm_cls(class_name_raw)
 
-                        # Catálogo visual/legacy (tu estructura original)
                         problem_info = self.problem_descriptions.get(class_name, {
                             'description': f'Problema detectado: {class_name}',
                             'severity': 'desconocida',
                             'solutions': ['Contactar a un especialista para evaluación'],
-                            'color': (128, 0, 128)  # Morado para desconocidos
+                            'color': (128, 0, 128)  # Morado
                         })
-                        
+
                         # Dibujar detección
                         cv2.rectangle(img, (x1, y1), (x2, y2), problem_info['color'], 2)
                         label = f"{class_name} {conf:.2f}"
-                        cv2.putText(img, label, (x1, y1-10), 
+                        cv2.putText(img, label, (x1, y1-10),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, problem_info['color'], 2)
-                        
-                        # Guardar detección (placeholder de descripción; se actualizará abajo)
+
                         detections.append({
                             'class': class_name,
                             'confidence': conf,
@@ -505,7 +526,7 @@ class ProblemDetector:
                     except Exception as e:
                         self.logger.error(f"Error procesando detección: {str(e)}")
                         continue
-            
+
             # Guardar imagen procesada
             result_path = image_path.replace('uploads', 'results')
             os.makedirs(os.path.dirname(result_path), exist_ok=True)
@@ -517,10 +538,9 @@ class ProblemDetector:
                 for d in detections
             ]
 
-            # Inferir zona automáticamente si no viene del front
             zona_inferida = zona or self._infer_zone(image_path, det_min, img_shape=img.shape)
 
-            # Actualizar descripciones dinámicas en 'detections' según zona/contexto
+            # Actualizar descripciones dinámicas
             counts = {}
             for dm in det_min:
                 c = self._norm_cls(dm["name"])
@@ -537,20 +557,18 @@ class ProblemDetector:
                 zona=zona_inferida,
                 img_shape=img.shape
             )
-            
-            # Respuestas legacy (se mantienen)
+
             return {
                 'original_image': image_path,
                 'processed_image': result_path,
                 'detections': detections,
                 'analysis': self._generate_analysis(detections),
                 'maintenance_report': self._generate_maintenance_report(detections),
-                # === NUEVO: salida estructurada para tu card ===
                 'resumen_inspeccion': structured['resumen_inspeccion'],
                 'reporte_incidencia': structured['reporte_incidencia'],
                 'solucion': structured['solucion']
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error en detect_problems: {str(e)}")
             return {'error': f"Error al procesar la imagen: {str(e)}"}
@@ -565,19 +583,19 @@ class ProblemDetector:
                 'class_distribution': {},
                 'average_confidence': 0
             }
-        
+
         class_dist = {}
         severity_dist = {}
         total_conf = 0
-        
+
         for det in detections:
             class_name = det['class']
             severity = det['severity']
-            
+
             class_dist[class_name] = class_dist.get(class_name, 0) + 1
             severity_dist[severity] = severity_dist.get(severity, 0) + 1
             total_conf += det['confidence']
-        
+
         return {
             'total_problems': len(detections),
             'severity_distribution': severity_dist,
@@ -594,7 +612,7 @@ class ProblemDetector:
                 'priority': 'ninguna',
                 'urgency': 'baja'
             }
-        
+
         severities = [det['severity'] for det in detections]
         priority = 'baja'
         if 'critica' in severities:
@@ -603,9 +621,9 @@ class ProblemDetector:
             priority = 'alta'
         elif 'media' in severities:
             priority = 'media'
-        
+
         actions = list({action for det in detections for action in det['solutions']})
-        
+
         return {
             'summary': f"Inspección detectó {len(detections)} problemas ({priority})",
             'recommended_actions': actions,
@@ -633,7 +651,6 @@ class ProblemDetector:
                 x1, y1, x2, y2 = map(int, b.xyxy[0])
                 detections.append({"name": name, "confidence": conf, "bbox": [x1, y1, x2, y2]})
 
-        # Inferir zona automáticamente si no viene del front
         zona_inferida = zona or self._infer_zone(image_path, detections, img_shape=img.shape)
 
         payload = self._build_structured_payload(
