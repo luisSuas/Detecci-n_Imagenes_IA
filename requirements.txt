@@ -10,7 +10,7 @@ python-multipart==0.0.6
 flask==3.0.0
 python-dotenv==1.0.0
 
-# ---- OpenAI + audio (Detect/Tutor) ----
+# ---- OpenAI + audio ----
 openai>=1.12.0
 websockets==11.0.3
 gTTS==2.3.2
@@ -20,18 +20,19 @@ PyPDF2==3.0.1
 pytesseract==0.3.10
 Pillow==10.0.0
 
-# ---- Visión / YOLO (Seguridad) ----
-# Usar "headless" en servidores (sin GUI) evita dependencias nativas.
+# ---- Visión / YOLO ----
 opencv-python-headless==4.9.0.80
 ultralytics==8.2.103
+thop==0.1.1.post2209072238
 numpy==1.26.4
 
-# ---- PyTorch CPU precompilado (desde índice oficial)
+# ---- PyTorch CPU wheels (sin compilar)
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.1.2
 torchvision==0.16.2
 torchaudio==2.1.2
 
-# ---- Herramientas de build (evita fallos de wheel)
+# ---- Herramientas de build
+pip>=24.0
 setuptools>=65.5.1
 wheel
