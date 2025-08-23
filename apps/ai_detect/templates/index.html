@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Detección de Objetos con YOLO</title>
 
-    <!-- Hace que todas las rutas relativas apunten a /ai-detect/ -->
+    <!-- Conservamos tu base para rutas internas del frontend -->
     <base href="/ai-detect/">
 
     <style>
@@ -41,6 +41,15 @@
         .class-distribution { margin-top: 15px; }
         .class-item { margin-bottom: 5px; }
         .class-bar { height: 10px; background-color: #4CAF50; border-radius: 4px; margin-top: 3px; }
+
+        /* ✨ Estilos mínimos para historial (no toco lo demás) */
+        .history-box { background-color: #f9f9f9; padding: 15px; border-radius: 8px; }
+        .history-list { max-height: 300px; overflow-y: auto; margin-top: 10px; }
+        .history-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; }
+        .history-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; }
+        .history-meta { display: flex; flex-direction: column; }
+        .history-title { font-weight: bold; }
+        .history-time { font-size: 12px; color: #666; }
     </style>
 </head>
 <body>
@@ -87,25 +96,44 @@
                     <h3>Detecciones Individuales</h3>
                     <div class="detection-list" id="detectionList"></div>
                 </div>
+
+                <!-- 🆕 Historial (nuevo bloque, independiente) -->
+                <div class="history-box">
+                    <h3>Historial de Inspecciones</h3>
+                    <div class="history-list" id="historyList"></div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
+        /*** CONFIGURACIÓN DE API *******************************
+         * URL pública de tu backend (correcta).
+         * Debe terminar con '/'.
+         ********************************************************/
+        const API_BASE = 'https://detecci-n-imagenes-ia.onrender.com/ai-detect/';
+
+        // Uniﬁcador seguro de rutas (evita // o faltas de /)
+        const joinUrl = (base, path) =>
+            String(base).replace(/\/+$/, '') + '/' + String(path).replace(/^\/+/, '');
+
         // Normaliza rutas de imagen (si el backend devuelve rutas de sistema o absolutas)
         function toWebPath(p) {
             if (!p) return '';
+            // Si ya es absoluta http(s), la usamos tal cual (útil si backend ya devuelve URL pública)
+            if (/^https?:\/\//i.test(p)) return p;
+
             // Extrae 'uploads/...' o 'results/...'
             const m = p.match(/(?:^|\/)(uploads|results)\/.+$/);
             if (m) {
-                // Quita / inicial para que respete <base href="/ai-detect/">
-                return m[0].replace(/^\//, '');
+                // Construimos URL absoluta hacia el backend para evitar problemas de <base>
+                return joinUrl(API_BASE, m[0].replace(/^\//, ''));
             }
-            // Si ya es relativa, la respetamos; si es absoluta http(s), también
+            // Si quedó algo relativo no estándar, respetamos
             return p;
         }
 
-        function uploadImage() {
+        async function uploadImage() {
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
 
@@ -124,8 +152,10 @@
             const formData = new FormData();
             formData.append('file', file);
 
-            // RUTA RELATIVA → gracias al <base> será /ai-detect/upload
-            fetch('upload', {
+            // 🔁 Ahora llamamos al backend por URL absoluta
+            const url = joinUrl(API_BASE, 'upload');
+
+            fetch(url, {
                 method: 'POST',
                 body: formData
             })
@@ -149,6 +179,9 @@
                 // Mostrar resultados
                 displayResults(data);
                 progressContainer.style.display = 'none';
+
+                // 🔄 Refrescar historial tras una carga exitosa
+                loadHistory().catch(console.warn);
             })
             .catch(error => {
                 console.error('Error en /upload:', error);
@@ -223,6 +256,74 @@
             // Mostrar la sección de resultados
             document.getElementById('results').style.display = 'flex';
         }
+
+        // 🆕 Carga y render de historial
+        async function loadHistory() {
+            const url = joinUrl(API_BASE, 'history');
+            const res = await fetch(url);
+            if (!res.ok) {
+                // No interrumpimos la UI por historial; solo avisamos en consola
+                const txt = await res.text().catch(() => '');
+                console.warn('No se pudo obtener historial:', res.status, txt);
+                return;
+            }
+            const json = await res.json();
+
+            // Soporta distintas formas de respuesta: array directo, {history: [...]}, {data: [...]}
+            const items = Array.isArray(json) ? json : (json.history || json.data || []);
+            renderHistory(items);
+        }
+
+        function renderHistory(items) {
+            const el = document.getElementById('historyList');
+            if (!el) return;
+
+            el.innerHTML = '';
+
+            if (!Array.isArray(items) || items.length === 0) {
+                el.innerHTML = '<p style="color:#666;">Sin inspecciones registradas aún.</p>';
+                return;
+            }
+
+            items.forEach((it) => {
+                // Campos tolerantes a diferentes estructuras
+                const thumb = toWebPath(it.processed_image || it.result_image || it.thumbnail || it.original_image || '');
+                const name  = it.filename || it.name || (it.original_image ? String(it.original_image).split('/').pop() : 'inspección');
+                const when  = it.timestamp || it.time || it.created_at || '';
+
+                const row = document.createElement('div');
+                row.className = 'history-item';
+
+                const img = document.createElement('img');
+                img.className = 'history-thumb';
+                img.src = thumb || '';
+                img.alt = name;
+
+                const meta = document.createElement('div');
+                meta.className = 'history-meta';
+
+                const title = document.createElement('span');
+                title.className = 'history-title';
+                title.textContent = name;
+
+                const t = document.createElement('span');
+                t.className = 'history-time';
+                t.textContent = when;
+
+                meta.appendChild(title);
+                meta.appendChild(t);
+
+                row.appendChild(img);
+                row.appendChild(meta);
+
+                el.appendChild(row);
+            });
+        }
+
+        // Cargar historial al iniciar (sin romper nada de lo existente)
+        document.addEventListener('DOMContentLoaded', () => {
+            loadHistory().catch(console.warn);
+        });
     </script>
 </body>
 </html>
