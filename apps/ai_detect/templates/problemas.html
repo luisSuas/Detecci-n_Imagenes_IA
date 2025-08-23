@@ -17,61 +17,31 @@
         .upload-section { background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,.1); padding: 2rem; margin-bottom: 2rem; }
         .result-container { background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,.1); padding: 1.5rem; margin-bottom: 2rem; }
         .image-preview { border: 1px solid #dee2e6; border-radius: 5px; margin-bottom: 1rem; max-width: 100%; height: auto; }
-
         .priority-box { border-left: 4px solid; padding-left: 1rem; margin-bottom: 1.5rem; }
-
-        .solution-item{
-            padding:.6rem .75rem;
-            margin-bottom:.5rem;
-            background-color:#e9ecef;
-            border:1px solid #dee2e6;
-            border-radius:6px;
-        }
-
+        .solution-item{ padding:.6rem .75rem; margin-bottom:.5rem; background-color:#e9ecef; border:1px solid #dee2e6; border-radius:6px; }
         .progress-container { display: none; margin: 1rem 0; }
         .history-item { cursor: pointer; padding: .5rem; border-bottom: 1px solid #dee2e6; }
         .history-item:hover { background-color: #f8f9fa; }
-
-        /* ====== Chat flotante ====== */
         .chat-toggle-btn { position: fixed; right: 20px; bottom: 20px; z-index: 1050; }
         .chat-panel {
             position: fixed; right: 20px; bottom: 80px; width: 360px; max-width: 92vw; height: 520px; max-height: 78vh;
             background: #fff; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.15); display: none; z-index: 1050; overflow: hidden; border: 1px solid #e5e7eb;
         }
         .chat-panel.open{ display:flex !important; flex-direction:column; }
-
-        .chat-header { 
-            padding: .6rem .8rem; background: #0d6efd; color: #fff; 
-            display: flex; align-items: center; justify-content: space-between; gap: .5rem;
-            flex-wrap: nowrap;
-        }
-        .chat-header > div:first-child{
-            min-width: 0; 
-            flex: 1 1 auto; 
-            display:flex; 
-            flex-direction:column; 
-            justify-content:center;
-        }
+        .chat-header { padding: .6rem .8rem; background: #0d6efd; color: #fff; display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: nowrap; }
+        .chat-header > div:first-child{ min-width: 0; flex: 1 1 auto; display:flex; flex-direction:column; justify-content:center; }
         .header-title{ font-weight: 700; line-height: 1; }
         .vu-under-title{ margin: .20rem 0 .15rem 0; }
-        .chat-small{
-            font-size: .85rem; color: #e7f1ff; opacity: .95;
-            display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
-        }
+        .chat-small{ font-size: .85rem; color: #e7f1ff; opacity: .95; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
         .chat-header .btn-group{ flex: 0 0 auto; gap: .4rem; flex-wrap: nowrap; align-items:center; }
-
         .chat-body { padding: .75rem; flex: 1 1 auto; overflow-y: auto; background: #f8fafc; }
-
         .chat-input { padding: .5rem; border-top: 1px solid #e5e7eb; background: #fff; flex: 0 0 auto; }
         .bubble { max-width: 85%; padding: .5rem .75rem; border-radius: 12px; margin: .35rem 0; white-space: pre-wrap; word-wrap: break-word; line-height: 1.25rem; font-size: .95rem; }
         .bubble.user { background: #0d6efd; color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
         .bubble.bot { background: #e9ecef; color: #111827; margin-right: auto; border-bottom-left-radius: 4px; }
-        .btn-voice { white-space: nowrap; }
-
         .mic-badge { font-size: .75rem; }
         #vuBar { width: 120px; height: 6px; background: #e9ecef; border-radius: 8px; overflow: hidden; }
         #vuFill { height: 100%; width: 0%; background: linear-gradient(90deg,#20c997,#ffc107,#dc3545); transition: width .08s linear; }
-
         .chat-header .btn{ padding: .25rem .5rem; line-height: 1.1; }
     </style>
 </head>
@@ -182,8 +152,7 @@
             BACKEND_ORIGIN + '/'            // sin prefijo
         ];
         const API_CACHE_KEY = 'API_BASE_OK_v2';
-
-        let API_BASE = null; // se fija en runtime
+        let API_BASE = null;
 
         const joinUrl = (base, path) =>
             String(base).replace(/\/+$/, '') + '/' + String(path).replace(/^\/+/, '');
@@ -201,40 +170,85 @@
                     }
                 } catch(_) {}
             }
-            // fallback al primero para no romper
             API_BASE = API_CANDIDATES[0];
             return API_BASE;
         }
+        async function getApiBase(){ if(!API_BASE) await detectApiBase(); return API_BASE; }
+        async function apiFetch(path, options){ const base = await getApiBase(); return fetch(joinUrl(base, path), options); }
 
-        async function getApiBase() {
-            if (!API_BASE) await detectApiBase();
-            return API_BASE;
-        }
-
-        // Envoltura para cualquier llamada a la API
-        async function apiFetch(path, options) {
-            const base = await getApiBase();
-            return fetch(joinUrl(base, path), options);
-        }
-
-        // ===== NUEVO: normalización robusta de rutas de imagen =====
+        /* ===== Normalizador simple (lo mantenemos por compatibilidad) ===== */
         function toImageUrl(p, base, kind){
             if (!p) return '';
-            // Absoluta → usar tal cual
             if (/^https?:\/\//i.test(p)) return p;
-            // Si viene ya con 'ai-detect/...'
             if (/^(?:\/)?ai-detect\//i.test(p)) return joinUrl(base || API_BASE || '', p.replace(/^\/+/, ''));
-            // Si viene con 'uploads/...' o 'results/...'
             const m = p.match(/(?:^|\/)(uploads|results)\/.+$/);
             if (m) return joinUrl(base || API_BASE || '', m[0].replace(/^\//, ''));
-            // Si es SOLO nombre de archivo → inferir carpeta
             const looksLikeFile = /\.[a-z0-9]{2,5}$/i.test(p);
             if (looksLikeFile) {
                 const folder = (kind === 'processed') ? 'results' : 'uploads';
                 return joinUrl(base || API_BASE || '', `${folder}/${p}`.replace(/\/\/+/g,'/'));
             }
-            // Último recurso: pegarlo al backend
             return joinUrl(base || API_BASE || '', p.replace(/^\//,''));
+        }
+
+        /* ========= NUEVO: fallback robusto para imágenes ========= */
+        function normalizePath(p){
+            if (!p) return '';
+            p = String(p).replace(/\\/g,'/');          // windows → web
+            p = p.replace(/^static\//i,'');            // si el backend añade "static/"
+            return p.replace(/^\/+/, '');
+        }
+        function unique(arr){ return [...new Set(arr.filter(Boolean))]; }
+
+        function buildImageCandidates(p, base, kind){
+            p = normalizePath(p);
+            const origin = BACKEND_ORIGIN.replace(/\/+$/,'');
+            const baseClean = String(base || API_BASE || '').replace(/\/+$/,'');
+            const fileOnly = p && !/\/./.test(p) ? p : p.split('/').pop();
+            const looksFile = /\.[a-z0-9]{2,5}$/i.test(fileOnly);
+            const folder = (kind === 'processed') ? 'results' : 'uploads';
+
+            const list = [];
+
+            // 1) Primer intento: lo que produce toImageUrl (mantiene compatibilidad)
+            list.push(toImageUrl(p, baseClean+'/', kind));
+
+            // 2) Si ya trae uploads/results → probar contra base y contra ORIGIN
+            if (/(^|\/)(uploads|results)\//i.test(p)) {
+                list.push(joinUrl(baseClean+'/', p));
+                list.push(joinUrl(origin+'/', p));
+            }
+
+            // 3) Si es nombre suelto → probar carpeta inferida en base y ORIGIN
+            if (looksFile) {
+                const rel = `${folder}/${fileOnly}`;
+                list.push(joinUrl(baseClean+'/', rel));
+                list.push(joinUrl(origin+'/', rel));
+            }
+
+            // 4) Último recurso: pegar p tal cual a base y a ORIGIN
+            if (p && !/^https?:\/\//i.test(p)) {
+                list.push(joinUrl(baseClean+'/', p));
+                list.push(joinUrl(origin+'/', p));
+            }
+
+            return unique(list);
+        }
+
+        function setImgWithFallback(imgEl, candidates){
+            if (!imgEl || !candidates || !candidates.length) return;
+            imgEl.dataset.idx = '0';
+            const trySet = () => {
+                const i = parseInt(imgEl.dataset.idx || '0', 10);
+                if (i >= candidates.length) return;
+                imgEl.src = candidates[i];
+            };
+            imgEl.onerror = () => {
+                let i = parseInt(imgEl.dataset.idx || '0', 10);
+                imgEl.dataset.idx = String(i+1);
+                trySet();
+            };
+            trySet();
         }
 
         // ===== Estado global =====
@@ -610,9 +624,12 @@
 
         function displayResults(data, base) {
             document.getElementById('results').classList.remove('d-none');
-            // 🔁 NUEVO: rutas blindadas (nombre de archivo → uploads/results)
-            document.getElementById('originalImage').src  = toImageUrl(data.original_image,  base, 'original');
-            document.getElementById('processedImage').src = toImageUrl(data.processed_image || data.result_image, base, 'processed');
+
+            // 🔁 NUEVO: asignación con fallback de URL
+            const origCandidates = buildImageCandidates(data.original_image, base, 'original');
+            const procCandidates = buildImageCandidates(data.processed_image || data.result_image, base, 'processed');
+            setImgWithFallback(document.getElementById('originalImage'), origCandidates);
+            setImgWithFallback(document.getElementById('processedImage'), procCandidates);
 
             lastFilename = data.filename || null;
 
@@ -688,10 +705,7 @@
                 setTimeout(() => { scrollChatToEnd(); document.getElementById('chatInput').focus(); }, 50);
             }
         }
-        function ensureChatOpen() {
-            const panel = document.getElementById('chatPanel');
-            if (!panel.classList.contains('open')) toggleChat();
-        }
+        function ensureChatOpen() { const panel = document.getElementById('chatPanel'); if (!panel.classList.contains('open')) toggleChat(); }
 
         function appendBubble(text, who='bot') {
             const body = document.getElementById('chatBody');
@@ -701,10 +715,7 @@
             body.appendChild(div);
             scrollChatToEnd();
         }
-        function scrollChatToEnd() {
-            const body = document.getElementById('chatBody');
-            body.scrollTop = body.scrollHeight;
-        }
+        function scrollChatToEnd() { const body = document.getElementById('chatBody'); body.scrollTop = body.scrollHeight; }
         function openAssistantWith(userText, botText, resumen) {
             const chatContext = document.getElementById('chatContext');
             chatContext.textContent = `Contexto: ${(resumen?.lugar) || 'N/D'} · ${((resumen?.prioridad_global) || 'baja').toUpperCase()}`;
@@ -713,7 +724,6 @@
             if (botText) { appendBubble(botText, 'bot'); }
         }
 
-        // ====== utilidades de placeholder "Pensando…" ======
         function appendThinkingBubble(){
             const body = document.getElementById('chatBody');
             const div = document.createElement('div');
