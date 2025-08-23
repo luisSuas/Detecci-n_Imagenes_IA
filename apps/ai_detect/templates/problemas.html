@@ -217,13 +217,24 @@
             return fetch(joinUrl(base, path), options);
         }
 
-        // Normaliza rutas de imagen respecto al backend
-        function toWebPath(p, base) {
+        // ===== NUEVO: normalización robusta de rutas de imagen =====
+        function toImageUrl(p, base, kind){
             if (!p) return '';
+            // Absoluta → usar tal cual
             if (/^https?:\/\//i.test(p)) return p;
+            // Si viene ya con 'ai-detect/...'
+            if (/^(?:\/)?ai-detect\//i.test(p)) return joinUrl(base || API_BASE || '', p.replace(/^\/+/, ''));
+            // Si viene con 'uploads/...' o 'results/...'
             const m = p.match(/(?:^|\/)(uploads|results)\/.+$/);
             if (m) return joinUrl(base || API_BASE || '', m[0].replace(/^\//, ''));
-            return p;
+            // Si es SOLO nombre de archivo → inferir carpeta
+            const looksLikeFile = /\.[a-z0-9]{2,5}$/i.test(p);
+            if (looksLikeFile) {
+                const folder = (kind === 'processed') ? 'results' : 'uploads';
+                return joinUrl(base || API_BASE || '', `${folder}/${p}`.replace(/\/\/+/g,'/'));
+            }
+            // Último recurso: pegarlo al backend
+            return joinUrl(base || API_BASE || '', p.replace(/^\//,''));
         }
 
         // ===== Estado global =====
@@ -599,8 +610,10 @@
 
         function displayResults(data, base) {
             document.getElementById('results').classList.remove('d-none');
-            document.getElementById('originalImage').src  = toWebPath(data.original_image, base);
-            document.getElementById('processedImage').src = toWebPath(data.processed_image, base);
+            // 🔁 NUEVO: rutas blindadas (nombre de archivo → uploads/results)
+            document.getElementById('originalImage').src  = toImageUrl(data.original_image,  base, 'original');
+            document.getElementById('processedImage').src = toImageUrl(data.processed_image || data.result_image, base, 'processed');
+
             lastFilename = data.filename || null;
 
             document.getElementById('totalProblems').textContent = data.analysis.total_problems;
