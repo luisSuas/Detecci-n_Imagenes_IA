@@ -173,6 +173,59 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        /* =======================
+           AUTODETECCIÓN DE BACKEND
+           ======================= */
+        const BACKEND_ORIGIN = 'https://detecci-n-imagenes-ia.onrender.com';
+        const API_CANDIDATES = [
+            BACKEND_ORIGIN + '/ai-detect/', // con prefijo
+            BACKEND_ORIGIN + '/'            // sin prefijo
+        ];
+        const API_CACHE_KEY = 'API_BASE_OK_v2';
+
+        let API_BASE = null; // se fija en runtime
+
+        const joinUrl = (base, path) =>
+            String(base).replace(/\/+$/, '') + '/' + String(path).replace(/^\/+/, '');
+
+        async function detectApiBase() {
+            const cached = localStorage.getItem(API_CACHE_KEY);
+            if (cached) { API_BASE = cached; return API_BASE; }
+            for (const base of API_CANDIDATES) {
+                try {
+                    const res = await fetch(joinUrl(base, 'history'), { method: 'GET' });
+                    if (res.ok || res.status === 204 || res.status === 200 || res.status === 405) {
+                        API_BASE = base;
+                        localStorage.setItem(API_CACHE_KEY, base);
+                        return base;
+                    }
+                } catch(_) {}
+            }
+            // fallback al primero para no romper
+            API_BASE = API_CANDIDATES[0];
+            return API_BASE;
+        }
+
+        async function getApiBase() {
+            if (!API_BASE) await detectApiBase();
+            return API_BASE;
+        }
+
+        // Envoltura para cualquier llamada a la API
+        async function apiFetch(path, options) {
+            const base = await getApiBase();
+            return fetch(joinUrl(base, path), options);
+        }
+
+        // Normaliza rutas de imagen respecto al backend
+        function toWebPath(p, base) {
+            if (!p) return '';
+            if (/^https?:\/\//i.test(p)) return p;
+            const m = p.match(/(?:^|\/)(uploads|results)\/.+$/);
+            if (m) return joinUrl(base || API_BASE || '', m[0].replace(/^\//, ''));
+            return p;
+        }
+
         // ===== Estado global =====
         let lastFilename = null;
         let lastSummaryTTS = "";
@@ -238,6 +291,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
+            await getApiBase(); // fija API_BASE antes de usar
             const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
             if (!window.isSecureContext && !isLocalhost) {
                 appendBubble("⚠️ Para usar el micrófono, abre esta página en HTTPS o en http://localhost.", "bot");
@@ -247,31 +301,33 @@
             setMicState('off'); setVuLevel(0);
         });
 
-        function loadHistory() {
-            fetch('/history')
-                .then(async r => {
-                    if (!r.ok) throw new Error('HTTP '+r.status);
-                    return r.json();
-                })
-                .then(data => {
-                    const historyList = document.getElementById('historyList');
-                    historyList.innerHTML = '';
-                    if (data.history && data.history.length > 0) {
-                        data.history.forEach(item => {
-                            const el = document.createElement('div');
-                            el.className = 'history-item';
-                            el.innerHTML = `
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <span>${item.timestamp.replace('_', ' ')}</span>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="inspectFile('${item.filename}')">Ver Detalles</button>
-                                </div>`;
-                            historyList.appendChild(el);
-                        });
-                    } else {
-                        historyList.innerHTML = '<div class="text-muted">No hay inspecciones previas</div>';
-                    }
-                })
-                .catch(err => console.error('Error al cargar historial:', err));
+        async function loadHistory() {
+            try {
+                const r = await apiFetch('history');
+                if (!r.ok) throw new Error('HTTP '+r.status);
+                const data = await r.json();
+                const historyList = document.getElementById('historyList');
+                historyList.innerHTML = '';
+                const items = Array.isArray(data) ? data : (data.history || data.data || []);
+                if (items && items.length > 0) {
+                    items.forEach(item => {
+                        const name = item.filename || item.name || 'inspección';
+                        const time = item.timestamp || item.time || item.created_at || '';
+                        const el = document.createElement('div');
+                        el.className = 'history-item';
+                        el.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>${time.toString().replace('_',' ')}</span>
+                                <button class="btn btn-sm btn-outline-primary" onclick="inspectFile('${name}')">Ver Detalles</button>
+                            </div>`;
+                        historyList.appendChild(el);
+                    });
+                } else {
+                    historyList.innerHTML = '<div class="text-muted">No hay inspecciones previas</div>';
+                }
+            } catch (err) {
+                console.error('Error al cargar historial:', err);
+            }
         }
 
         function hashText(t){ let h=0; for (let i=0;i<t.length;i++){ h=((h<<5)-h)+t.charCodeAt(i); h|=0;} return h; }
@@ -280,7 +336,7 @@
             const h = hashText(text); if (lastTtsHash !== null && lastTtsHash === h) return;
             isSpeaking = true; lastTtsHash = h;
             try {
-                const r = await fetch("/tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ text, voice })});
+                const r = await apiFetch("tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ text, voice })});
                 if (!r.ok){ isSpeaking=false; return; }
                 const blob = await r.blob(); const url = URL.createObjectURL(blob);
                 const audio = document.getElementById("botAudio");
@@ -323,10 +379,10 @@
                 fd.append("seq", String(seq));
                 if (sttSid) fd.append("sid", sttSid);
 
-                const r = await fetch("/stt_chunk", { method: "POST", body: fd });
+                const r = await apiFetch("stt_chunk", { method: "POST", body: fd });
                 if (!r.ok) {
                     console.warn("stt_chunk no-ok", r.status);
-                    return; // ignorar este chunk y seguir
+                    return;
                 }
                 const data = await r.json();
                 console.log("STT partial", { seq, size: blob.size, data });
@@ -397,7 +453,7 @@
                                 const fd = new FormData();
                                 fd.append("audio", fullBlob, "full.webm");
                                 if (sttSid) fd.append("sid", sttSid);
-                                const resp = await fetch("/stt", { method: "POST", body: fd });
+                                const resp = await apiFetch("stt", { method: "POST", body: fd });
 
                                 if (resp.ok) {
                                     const j = await resp.json();
@@ -415,7 +471,7 @@
 
                         if (!finalQ) {
                             appendBubble("No pude transcribir el audio (verifica que el VU se mueva y habla cerca del micro).", "bot"); 
-                            try{ if (sttSid) await fetch('/stt_close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid: sttSid})}); }catch(_){}
+                            try{ if (sttSid) await apiFetch('stt_close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid: sttSid})}); }catch(_){}
                             sttPartials = {}; sttAllChunks = []; sttLiveMerged = "";
                             sttSid = null;
                             return; 
@@ -427,7 +483,7 @@
                         await askWithText(finalQ);
                         chatInput.value = "";
 
-                        try{ if (sttSid) await fetch('/stt_close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid: sttSid})}); }catch(_){}
+                        try{ if (sttSid) await apiFetch('stt_close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid: sttSid})}); }catch(_){}
                         sttPartials = {}; sttAllChunks = []; sttLiveMerged = "";
                         sttSid = null;
                     };
@@ -444,7 +500,7 @@
             }
         }
 
-        function uploadImage() {
+        async function uploadImage() {
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             const userPromptEl = document.getElementById('userPrompt');
@@ -468,7 +524,7 @@
             const formData = new FormData();
             formData.append('file', file);
 
-            fetch('/upload', { method: 'POST', body: formData })
+            apiFetch('upload', { method: 'POST', body: formData })
             .then(async r => {
                 progressBar.style.width = '70%';
                 progressText.textContent = 'Analizando problemas...';
@@ -476,11 +532,12 @@
                 return r.json();
             })
             .then(async data => {
+                const base = await getApiBase();
                 progressBar.style.width = '100%';
                 progressText.textContent = 'Completado!';
                 if (data.error) { alert(`Error: ${data.error}`); reset(); return; }
 
-                displayResults(data);
+                displayResults(data, base);
                 loadHistory();
 
                 lastSummaryTTS = data.summary_tts_text || "";
@@ -511,7 +568,7 @@
             }
         }
 
-        function inspectFile(filename) {
+        async function inspectFile(filename) {
             const progressContainer = document.getElementById('progressContainer');
             const progressBar = document.getElementById('progressBar');
             const progressText = document.getElementById('progressText');
@@ -520,16 +577,17 @@
             progressBar.style.width = '50%';
             progressText.textContent = 'Cargando inspección...';
 
-            fetch(`/inspect/${encodeURIComponent(filename)}`)
+            apiFetch(`inspect/${encodeURIComponent(filename)}`)
             .then(async r => {
                 if (!r.ok) throw new Error('HTTP '+r.status);
                 return r.json();
             })
-            .then(data => {
+            .then(async data => {
+                const base = await getApiBase();
                 progressBar.style.width = '100%';
                 progressText.textContent = 'Completado!';
                 if (data.error) { alert(`Error: ${data.error}`); return; }
-                displayResults(data);
+                displayResults(data, base);
 
                 lastSummaryTTS = data.summary_tts_text || "";
                 document.getElementById('btnReadSummary').disabled = !lastSummaryTTS;
@@ -539,10 +597,10 @@
             .catch(err => { console.error('Error en /inspect:', err); alert('Ocurrió un error al cargar la inspección'); progressContainer.style.display = 'none'; });
         }
 
-        function displayResults(data) {
+        function displayResults(data, base) {
             document.getElementById('results').classList.remove('d-none');
-            document.getElementById('originalImage').src = data.original_image;
-            document.getElementById('processedImage').src = data.processed_image;
+            document.getElementById('originalImage').src  = toWebPath(data.original_image, base);
+            document.getElementById('processedImage').src = toWebPath(data.processed_image, base);
             lastFilename = data.filename || null;
 
             document.getElementById('totalProblems').textContent = data.analysis.total_problems;
@@ -673,7 +731,7 @@
             let data = null, errorFinal = null;
             for (let i=0;i<3;i++){
                 try{
-                    const res = await fetch('/ask', {
+                    const res = await apiFetch('ask', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload)
