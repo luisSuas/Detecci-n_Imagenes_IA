@@ -148,8 +148,8 @@
            ======================= */
         const BACKEND_ORIGIN = 'https://detecci-n-imagenes-ia.onrender.com';
         const API_CANDIDATES = [
-            BACKEND_ORIGIN + '/ai-detect/', // con prefijo
-            BACKEND_ORIGIN + '/'            // sin prefijo
+            BACKEND_ORIGIN + '/ai-detect/',
+            BACKEND_ORIGIN + '/'
         ];
         const API_CACHE_KEY = 'API_BASE_OK_v2';
         let API_BASE = null;
@@ -176,7 +176,7 @@
         async function getApiBase(){ if(!API_BASE) await detectApiBase(); return API_BASE; }
         async function apiFetch(path, options){ const base = await getApiBase(); return fetch(joinUrl(base, path), options); }
 
-        /* ===== Normalizador simple (lo mantenemos por compatibilidad) ===== */
+        /* ===== Normalizador legado para compatibilidad ===== */
         function toImageUrl(p, base, kind){
             if (!p) return '';
             if (/^https?:\/\//i.test(p)) return p;
@@ -191,50 +191,95 @@
             return joinUrl(base || API_BASE || '', p.replace(/^\//,''));
         }
 
-        /* ========= NUEVO: fallback robusto para imágenes ========= */
+        /* ========= NUEVO: fallback robusto y silencioso ========= */
         function normalizePath(p){
             if (!p) return '';
             p = String(p).replace(/\\/g,'/');          // windows → web
             p = p.replace(/^static\//i,'');            // si el backend añade "static/"
             return p.replace(/^\/+/, '');
         }
+        function pickUploadsOrResults(p){
+            const m = String(p).match(/(?:^|\/)((?:static\/)?(?:uploads|results)\/[^?#]+)/i);
+            return m ? m[1].replace(/^static\//i,'') : null;
+        }
         function unique(arr){ return [...new Set(arr.filter(Boolean))]; }
 
-        function buildImageCandidates(p, base, kind){
-            p = normalizePath(p);
+        function buildImageCandidates(raw, base, kind){
+            let p = normalizePath(raw);
             const origin = BACKEND_ORIGIN.replace(/\/+$/,'');
             const baseClean = String(base || API_BASE || '').replace(/\/+$/,'');
-            const fileOnly = p && !/\/./.test(p) ? p : p.split('/').pop();
+
+            const fileOnly = p.split('/').pop();
             const looksFile = /\.[a-z0-9]{2,5}$/i.test(fileOnly);
             const folder = (kind === 'processed') ? 'results' : 'uploads';
 
+            const ur = pickUploadsOrResults(p);
             const list = [];
 
-            // 1) Primer intento: lo que produce toImageUrl (mantiene compatibilidad)
+            // si ya es URL http(s)
+            if (/^https?:\/\//i.test(raw||'')) list.push(raw);
+
+            // preferimos rutas "limpias" de uploads/results (también con static/)
+            if (ur){
+                list.push(joinUrl(baseClean+'/', ur));                  // .../ai-detect/uploads/...
+                list.push(joinUrl(baseClean+'/', 'static/'+ur));        // .../ai-detect/static/uploads/...
+                list.push(joinUrl(origin+'/', ur));                     // .../uploads/...
+                list.push(joinUrl(origin+'/', 'static/'+ur));           // .../static/uploads/...
+            }
+
+            // compat: lo que ya hacía toImageUrl
             list.push(toImageUrl(p, baseClean+'/', kind));
 
-            // 2) Si ya trae uploads/results → probar contra base y contra ORIGIN
-            if (/(^|\/)(uploads|results)\//i.test(p)) {
-                list.push(joinUrl(baseClean+'/', p));
-                list.push(joinUrl(origin+'/', p));
-            }
-
-            // 3) Si es nombre suelto → probar carpeta inferida en base y ORIGIN
-            if (looksFile) {
+            // si solo vino el nombre → inferimos carpeta
+            if (looksFile){
                 const rel = `${folder}/${fileOnly}`;
                 list.push(joinUrl(baseClean+'/', rel));
+                list.push(joinUrl(baseClean+'/', 'static/'+rel));
                 list.push(joinUrl(origin+'/', rel));
+                list.push(joinUrl(origin+'/', 'static/'+rel));
             }
 
-            // 4) Último recurso: pegar p tal cual a base y a ORIGIN
+            // último recurso: adjuntar p tal cual
             if (p && !/^https?:\/\//i.test(p)) {
                 list.push(joinUrl(baseClean+'/', p));
                 list.push(joinUrl(origin+'/', p));
             }
 
-            return unique(list);
+            // quitamos rutas internas del contenedor (ruido 404 seguro)
+            const filtered = list.filter(u => !/\/opt\/render\//i.test(u));
+            return unique(filtered);
         }
 
+        async function fetchWithTimeout(url, ms=2200, method='HEAD'){
+            const ac = new AbortController();
+            const id = setTimeout(()=>ac.abort(), ms);
+            try{
+                const r = await fetch(url, { method, signal: ac.signal, cache: 'no-store' });
+                return r;
+            }catch(e){
+                return { ok:false, status:0, error:e };
+            }finally{
+                clearTimeout(id);
+            }
+        }
+        async function resolveAndSetImg(imgEl, candidates, label){
+            if (!imgEl || !candidates || !candidates.length) return;
+            // Intento silencioso: HEAD → (si 403/405) GET; si CORS/status 0, caemos al onerror fallback
+            for (const url of candidates){
+                let r = await fetchWithTimeout(url, 2200, 'HEAD');
+                if (r.ok) { imgEl.src = url; console.debug(`✅ ${label}:`, url); return; }
+                if ([403,405].includes(r.status)){  // algunos servidores no responden a HEAD
+                    r = await fetchWithTimeout(url, 2200, 'GET');
+                    if (r.ok) { imgEl.src = url; console.debug(`✅ ${label} (GET):`, url); return; }
+                }
+                // si r.status === 0 probablemente es CORS; probaremos con el fallback visual
+            }
+            // Fallback sin bloquear la carga: usaremos onerror para iterar
+            setImgWithFallback(imgEl, candidates);
+            console.warn(`⚠️ ${label}: usando fallback por CORS/indisponibilidad.`, candidates[0]);
+        }
+
+        // Fallback visual por onerror (lo dejamos por compatibilidad)
         function setImgWithFallback(imgEl, candidates){
             if (!imgEl || !candidates || !candidates.length) return;
             imgEl.dataset.idx = '0';
@@ -625,11 +670,11 @@
         function displayResults(data, base) {
             document.getElementById('results').classList.remove('d-none');
 
-            // 🔁 NUEVO: asignación con fallback de URL
+            // 👉 Resolución silenciosa (HEAD/GET) + fallback
             const origCandidates = buildImageCandidates(data.original_image, base, 'original');
             const procCandidates = buildImageCandidates(data.processed_image || data.result_image, base, 'processed');
-            setImgWithFallback(document.getElementById('originalImage'), origCandidates);
-            setImgWithFallback(document.getElementById('processedImage'), procCandidates);
+            resolveAndSetImg(document.getElementById('originalImage'), origCandidates, 'original');
+            resolveAndSetImg(document.getElementById('processedImage'), procCandidates, 'procesada');
 
             lastFilename = data.filename || null;
 
