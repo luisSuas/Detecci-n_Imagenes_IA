@@ -1,26 +1,30 @@
+import os
 import cv2
+import json
+import time
+import uuid
+import base64
+import asyncio
+import threading
+from pathlib import Path
+from typing import Dict
+
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from ultralytics import YOLO
-import asyncio
-import uuid
-import os
-import base64
-from pathlib import Path
-import json
-from typing import Dict
-import threading
-import time
 
+# ───────────────────────── App (root_path para subruta en prod) ─────────────────────────
+ROOT_PATH = os.getenv("ROOT_PATH", "")  # p.ej. "/ai-seguridad" en Render
 app = FastAPI(
     title="Sistema de Seguridad",
-    description="Detección de objetos peligrosos en tiempo real"
+    description="Detección de objetos peligrosos en tiempo real",
+    root_path=ROOT_PATH,
 )
 
-# ───────────────────────── Directorios (robusto para prod y subpath) ─────────────────────────
+# ───────────────────────── Directorios ─────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -43,7 +47,6 @@ def get_model() -> YOLO:
     if _model is None:
         with _model_lock:
             if _model is None:
-                # Si no existe el archivo, YOLO intentará resolverlo por nombre (siempre que esté disponible)
                 model_source = str(MODEL_PATH) if MODEL_PATH.exists() else "yolov8n.pt"
                 _model = YOLO(model_source)  # CPU por defecto si no hay GPU
     return _model
@@ -63,7 +66,6 @@ def detect_dangers(frame):
     danger_detected = False
     detected_objects = []
 
-    # Dibujos sobre 'frame' en sitio
     for result in results:
         for box in result.boxes:
             class_id = int(box.cls)
@@ -74,7 +76,6 @@ def detect_dangers(frame):
 
             if class_name in DANGER_CLASSES and confidence > 0.5:
                 danger_detected = True
-                # Rojo para peligros
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
                 label = f"ALERTA! {class_name.upper()} {confidence:.2f}"
                 cv2.putText(frame, label, (x1, max(20, y1 - 10)),
@@ -86,19 +87,22 @@ def detect_dangers(frame):
                 })
 
             elif class_name in SAFETY_CLASSES and confidence > 0.5:
-                # Verde para elementos “seguros”
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 label = f"{class_name.upper()} {confidence:.2f}"
                 cv2.putText(frame, label, (x1, max(20, y1 - 10)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-    # Banner superior si hay alerta
     if danger_detected:
         cv2.rectangle(frame, (0, 0), (frame.shape[1], 50), (0, 0, 255), -1)
         cv2.putText(frame, "ZONA PELIGROSA DETECTADA!", (20, 35),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
     return frame, danger_detected, detected_objects
+
+# ───────────────────────── Healthcheck ─────────────────────────
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
 # ───────────────────────── Home ─────────────────────────
 @app.get("/", response_class=HTMLResponse)
@@ -117,18 +121,15 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
 
     processed_frame, danger_detected, detected_objects = detect_dangers(frame)
 
-    # Guardar imagen procesada
     out_name = f"processed_{uuid.uuid4().hex}.jpg"
     out_path = STATIC_DIR / "uploads" / out_name
     cv2.imwrite(str(out_path), processed_frame)
 
-    # Imagen en base64 para previsualización inmediata
     ok, img_encoded = cv2.imencode(".jpg", processed_frame)
     if not ok:
         return {"error": "No se pudo codificar la imagen de salida."}
     img_base64 = base64.b64encode(img_encoded).decode("utf-8")
 
-    # URL estática consciente de root_path
     root = request.scope.get("root_path", "") or ""
     image_url = f"{root}/static/uploads/{out_name}"
 
@@ -142,7 +143,6 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
 # ───────────────────────── Upload de Video ─────────────────────────
 @app.post("/upload/video")
 async def upload_video(request: Request, file: UploadFile = File(...)):
-    # Guardar temporal
     temp_name = f"temp_{uuid.uuid4().hex}.mp4"
     temp_file = STATIC_DIR / "uploads" / temp_name
     with open(temp_file, "wb") as buffer:
@@ -156,10 +156,9 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
             pass
         return {"error": "No se pudo abrir el video."}
 
-    # Configurar video de salida
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if not fps or fps <= 1:
+    fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    if fps <= 1:
         fps = 24.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
@@ -196,20 +195,17 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
 active_cameras: Dict[int, cv2.VideoCapture] = {}
 camera_lock = threading.Lock()
 
-# Cooldown para no spamear alertas por WS (segundos)
 ALERT_COOLDOWN_SEC = 5
 _last_alert_sent: Dict[int, float] = {}
 
 @app.get("/live", response_class=HTMLResponse)
 async def live_camera(request: Request):
-    # Pasamos root_path por si en tus templates quieres usarlo
     return templates.TemplateResponse("camera.html", {"request": request})
 
 @app.websocket("/ws/{camera_id}")
 async def websocket_endpoint(websocket: WebSocket, camera_id: int = 0):
     await websocket.accept()
 
-    # URL de cámara: 0 = webcam local, >0 cámaras RTSP (ajusta a tu topología)
     camera_url = camera_id if camera_id == 0 else f"rtsp://admin:password@192.168.1.{100 + camera_id}/live.sdp"
 
     with camera_lock:
@@ -225,35 +221,25 @@ async def websocket_endpoint(websocket: WebSocket, camera_id: int = 0):
         while True:
             ret, frame = cap.read()
             if not ret:
-                # Frame de “offline” si falla la captura
                 frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(frame, f"CAM {camera_id} OFFLINE", (50, 240),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 danger_detected = False
             else:
-                # Procesar detección
                 frame, danger_detected, _ = detect_dangers(frame)
 
-            # Redimensionamos para rendimiento y ancho estable
             frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_AREA)
 
-            # Si hay alerta y cooldown cumplido → enviar mensaje de texto (para UI)
             if danger_detected:
                 now = time.time()
                 last = _last_alert_sent.get(camera_id, 0)
                 if now - last >= ALERT_COOLDOWN_SEC:
                     _last_alert_sent[camera_id] = now
-                    # Enviamos JSON corto; el front puede mirar "type":"alert"
-                    await websocket.send_text(json.dumps({
-                        "type": "alert",
-                        "camera_id": camera_id,
-                        "ts": int(now)
-                    }))
+                    # Envío de texto plano para que camera.html lo detecte tal como está
+                    await websocket.send_text("ALERTA")
 
-            # Enviar frame como JPEG binario
             ok, buffer = cv2.imencode(".jpg", frame)
             if not ok:
-                # Si por algún motivo no codifica, enviamos un frame “negro”
                 fallback = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(fallback, "CODIFICACION FALLIDA", (60, 240),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
@@ -262,7 +248,6 @@ async def websocket_endpoint(websocket: WebSocket, camera_id: int = 0):
             await websocket.send_bytes(buffer.tobytes())
             await asyncio.sleep(0.05)  # ~20 FPS
     except Exception as e:
-        # Log básico a stdout (revisable en logs de prod)
         print(f"[WS] Error en cámara {camera_id}: {e}")
     finally:
         with camera_lock:
@@ -282,8 +267,7 @@ async def websocket_endpoint(websocket: WebSocket, camera_id: int = 0):
 async def analysis_results(request: Request, image_id: str):
     return templates.TemplateResponse("analysis.html", {"request": request, "image_id": image_id})
 
-# ───────────────────────── Entrypoint ─────────────────────────
+# ───────────────────────── Entrypoint local ─────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    # En prod normalmente usarás un servidor ASGI (gunicorn/uvicorn workers). Este es para local.
     uvicorn.run(app, host="0.0.0.0", port=8000)
