@@ -4,29 +4,17 @@
 
 {% block head %}
 <style>
-    #video-container {
-        position: relative;
-        max-width: 800px;
-        margin: 0 auto;
-    }
-    #video-feed {
-        width: 100%;
-        border-radius: 10px;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-        background: #000;
-    }
-    .alert-mode { border: 3px solid #dc3545; animation: alert-pulse 0.5s infinite alternate; }
+    #video-container { position: relative; max-width: 800px; margin: 0 auto; }
+    #video-feed { width: 100%; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); background:#000; }
+    .alert-mode { border: 3px solid #dc3545; animation: alert-pulse .5s infinite alternate; }
     @keyframes alert-pulse { from { box-shadow: 0 0 5px #dc3545; } to { box-shadow: 0 0 30px #dc3545; } }
-    #alert-indicator {
-        position: absolute; top: 20px; left: 20px; right: 20px;
-        z-index: 10; display: none;
-    }
+    #alert-indicator { position:absolute; top:20px; left:20px; right:20px; z-index:10; display:none; }
     #controls { max-width: 800px; margin: 20px auto 0; }
     .camera-selector { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
     .log-container { max-width: 800px; margin: 30px auto 0; max-height: 200px; overflow-y: auto; }
-    .log-entry { padding: 10px 15px; margin-bottom: 8px; border-radius: 5px; font-size: 0.9rem; }
-    .log-alert { background-color: #f8d7da; border-left: 4px solid #dc3545; }
-    .log-info  { background-color: #e2e3e5; border-left: 4px solid #6c757d; }
+    .log-entry { padding: 10px 15px; margin-bottom: 8px; border-radius: 5px; font-size: .9rem; }
+    .log-alert { background-color:#f8d7da; border-left:4px solid #dc3545; }
+    .log-info  { background-color:#e2e3e5; border-left:4px solid #6c757d; }
 </style>
 {% endblock %}
 
@@ -64,13 +52,13 @@
     </div>
 
     <div id="controls" class="d-flex justify-content-center gap-3 mt-4">
-        <button onclick="location.href='/'" class="btn btn-secondary">
+        <button id="btn-back" class="btn btn-secondary">
             <i class="bi bi-arrow-left me-2"></i>Volver
         </button>
         <button id="pause-btn" class="btn btn-warning">
             <i class="bi bi-pause me-2"></i>Pausar
         </button>
-        <button onclick="location.reload()" class="btn btn-danger">
+        <button id="btn-reload" class="btn btn-danger">
             <i class="bi bi-arrow-clockwise me-2"></i>Reiniciar
         </button>
         <button id="snapshot-btn" class="btn btn-info">
@@ -91,13 +79,22 @@
 
 {% block scripts %}
 <script>
-    const video         = document.getElementById('video-feed');
-    const alertIndicator= document.getElementById('alert-indicator');
-    const pauseBtn      = document.getElementById('pause-btn');
-    const snapshotBtn   = document.getElementById('snapshot-btn');
-    const switchBtn     = document.getElementById('switch-camera-btn');
-    const cameraSelect  = document.getElementById('camera-select');
-    const eventLog      = document.getElementById('event-log');
+    // Root path seguro (soporta subpath como /ai-seguridad)
+    const ROOT = "{{ request.scope.get('root_path','') }}";
+
+    const video          = document.getElementById('video-feed');
+    const alertIndicator = document.getElementById('alert-indicator');
+    const pauseBtn       = document.getElementById('pause-btn');
+    const snapshotBtn    = document.getElementById('snapshot-btn');
+    const switchBtn      = document.getElementById('switch-camera-btn');
+    const cameraSelect   = document.getElementById('camera-select');
+    const eventLog       = document.getElementById('event-log');
+
+    // Botones que dependen del ROOT
+    document.getElementById('btn-back').addEventListener('click', () => {
+        location.href = (ROOT || '/') + '/';
+    });
+    document.getElementById('btn-reload').addEventListener('click', () => location.reload());
 
     let websocket;
     let isPaused        = false;
@@ -106,19 +103,22 @@
     let currentCameraId = 0;
     let lastObjectUrl   = null;
 
+    function wsUrl(cameraId){
+        const proto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
+        // Respetar subpath: ws://host{ROOT}/ws/{id}
+        const base  = `${proto}//${location.host}${ROOT || ''}`;
+        return `${base}/ws/${cameraId}`;
+    }
+
     // Conectar a WebSocket
     function connectWebSocket(cameraId) {
-        // Cerrar conexión anterior si existe
         try { if (websocket && websocket.readyState === WebSocket.OPEN) websocket.close(1000, 'switching camera'); } catch(_) {}
 
         currentCameraId = cameraId;
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        websocket = new WebSocket(`${protocol}//${window.location.host}/ws/${cameraId}`);
+        websocket = new WebSocket(wsUrl(cameraId));
         websocket.binaryType = 'arraybuffer'; // recibir frames como ArrayBuffer
 
-        websocket.onopen = () => {
-            addLog(`Cámara ${cameraId} conectada`, "info");
-        };
+        websocket.onopen = () => addLog(`Cámara ${cameraId} conectada`, "info");
 
         websocket.onmessage = (event) => {
             if (isPaused) return;
@@ -141,7 +141,6 @@
                 return; // tipo no esperado
             }
 
-            // Evitar fugas de memoria liberando la URL anterior
             try { if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl); } catch(_) {}
             lastObjectUrl = URL.createObjectURL(blob);
             video.src = lastObjectUrl;
@@ -149,26 +148,21 @@
 
         websocket.onclose = () => {
             addLog(`Cámara ${cameraId} desconectada`, "info");
-            // Reconexión automática
             setTimeout(() => connectWebSocket(cameraId), 2000);
         };
 
-        websocket.onerror = () => {
-            addLog(`Error en cámara ${cameraId}`, "alert");
-        };
+        websocket.onerror = () => addLog(`Error en cámara ${cameraId}`, "alert");
     }
 
-    // Detectar si el texto recibido es una alerta (permite JSON o texto plano)
+    // Detectar si el texto recibido es una alerta (JSON o texto plano)
     function isAlertMessage(text) {
         if (!text) return false;
-        // 1) JSON con bandera de alerta
         if (text.trim().startsWith('{')) {
             try {
                 const j = JSON.parse(text);
                 if (j && (j.alert === true || j.type === 'alert' || j.level === 'danger')) return true;
             } catch (_) {}
         }
-        // 2) Texto plano con palabra "ALERTA"
         return String(text).toUpperCase().includes('ALERTA');
     }
 
@@ -182,7 +176,6 @@
         video.classList.add('alert-mode');
         alertIndicator.style.display = 'block';
 
-        // Sonido de alerta (si el navegador lo permite)
         try {
             const audio = new Audio("https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3");
             audio.play().catch(()=>{});
@@ -206,8 +199,6 @@
             ${new Date().toLocaleTimeString()} - ${message}
         `;
         eventLog.prepend(logEntry);
-
-        // Mantener un máximo de 10 entradas
         if (eventLog.children.length > 10) eventLog.removeChild(eventLog.lastChild);
     }
 
@@ -249,10 +240,8 @@
         }
     });
 
-    // Iniciar conexión con la cámara local por defecto
-    document.addEventListener('DOMContentLoaded', () => {
-        connectWebSocket(0);
-    });
+    // Iniciar cámara local por defecto
+    document.addEventListener('DOMContentLoaded', () => connectWebSocket(0));
 
     // Limpieza al salir
     window.addEventListener('beforeunload', () => {

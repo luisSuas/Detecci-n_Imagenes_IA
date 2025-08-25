@@ -82,7 +82,7 @@
                         </ul>
                     </div>
                     <div class="col-md-4 text-center">
-                        <a href="/live" class="btn btn-info btn-lg">
+                        <a id="monitoring-link" class="btn btn-info btn-lg">
                             <i class="bi bi-play-fill me-2"></i>Start Monitoring
                         </a>
                     </div>
@@ -142,14 +142,27 @@
 
 {% block scripts %}
 <script>
-    // Utilidades mínimas para robustez en producción (subpaths, cookies/sesión)
-    const apiFetch = (path, opts={}) => {
-        // Permite que tu app funcione tras un proxy/subruta y con sesión
-        const url = path.startsWith('http') ? path : (new URL(path, window.location.origin)).toString();
-        return fetch(url, {
-            credentials: 'same-origin',
-            ...opts
-        });
+    // Root path seguro para prod (soporta subruta como /ai-seguridad)
+    const ROOT = "{{ request.scope.get('root_path','') }}";
+
+    // setear href del botón "Start Monitoring" respetando ROOT
+    document.getElementById('monitoring-link').href = (ROOT || '') + '/live';
+
+    // Helpers de red seguros con ROOT
+    function buildUrl(path) {
+        if (!path) return path;
+        if (path.startsWith('http://') || path.startsWith('https://')) return path;
+        // Si ya viene con ROOT, lo respetamos
+        if (ROOT && path.startsWith(ROOT + '/')) return path;
+        // Asegurar una sola barra
+        const left = (ROOT || '');
+        const right = path.startsWith('/') ? path : '/' + path;
+        return left + right;
+    }
+
+    const apiFetch = (path, opts = {}) => {
+        const url = buildUrl(path);
+        return fetch(url, { credentials: 'same-origin', ...opts });
     };
 
     // Manejar envío de imagen
@@ -163,66 +176,50 @@
 
         try {
             const formData = new FormData(form);
-            const response = await apiFetch('/upload/image', {
-                method: 'POST',
-                body: formData
-            });
+            const response = await apiFetch('/upload/image', { method: 'POST', body: formData });
 
-            // Mensajes de error más claros (413, 415, 500, etc.)
             if (!response.ok) {
                 let msg = 'Error in processing';
                 try {
                     const ct = response.headers.get('content-type') || '';
                     if (ct.includes('application/json')) {
                         const err = await response.json();
-                        if (err && (err.message || err.error)) msg = err.message || err.error;
+                        msg = err?.message || err?.error || msg;
                     } else {
-                        msg = await response.text();
+                        msg = (await response.text()) || msg;
                     }
-                } catch(_) {}
+                } catch {}
                 throw new Error(msg || `HTTP ${response.status}`);
             }
 
             const ct = response.headers.get('content-type') || '';
-            if (!ct.includes('application/json')) {
-                throw new Error('Unexpected response (not JSON)');
-            }
+            if (!ct.includes('application/json')) throw new Error('Unexpected response (not JSON)');
 
             const data = await response.json();
-
             document.getElementById('image-placeholder').style.display = 'none';
 
-            // Campos tolerantes: algunos backends usan nombres alternativos
-            const danger = !!(data.danger_detected || data.alert || data.has_threat);
-            const objects = Array.isArray(data.detected_objects) ? data.detected_objects : (Array.isArray(data.objects) ? data.objects : []);
+            const danger   = !!(data.danger_detected || data.alert || data.has_threat);
+            const objects  = Array.isArray(data.detected_objects) ? data.detected_objects :
+                             (Array.isArray(data.objects) ? data.objects : []);
             const imgBase64 = data.image_base64 || data.result_image_base64 || '';
-            const imgUrl = data.image_url || data.result_image_url || '';
+            const imgUrl    = data.image_url || data.result_image_url || '';
 
-            // Alerta
-            let alertHtml = '';
-            if (danger) {
-                alertHtml = `
-                    <div class="alert alert-danger d-flex align-items-center">
-                        <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
-                        <div>
-                            <h4 class="alert-heading">¡SECURITY ALERT!</h4>
-                            <p class="mb-0">They have been detected ${objects.length} dangerous objects in the image</p>
-                        </div>
+            let alertHtml = danger ? `
+                <div class="alert alert-danger d-flex align-items-center">
+                    <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
+                    <div>
+                        <h4 class="alert-heading">¡SECURITY ALERT!</h4>
+                        <p class="mb-0">They have been detected ${objects.length} dangerous objects in the image</p>
                     </div>
-                `;
-            } else {
-                alertHtml = `
-                    <div class="alert alert-success d-flex align-items-center">
-                        <i class="bi bi-check-circle-fill fs-3 me-3"></i>
-                        <div>
-                            <h4 class="alert-heading">Safe area</h4>
-                            <p class="mb-0">No dangerous objects were detected in the image</p>
-                        </div>
+                </div>` : `
+                <div class="alert alert-success d-flex align-items-center">
+                    <i class="bi bi-check-circle-fill fs-3 me-3"></i>
+                    <div>
+                        <h4 class="alert-heading">Safe area</h4>
+                        <p class="mb-0">No dangerous objects were detected in the image</p>
                     </div>
-                `;
-            }
+                </div>`;
 
-            // Lista de objetos (si hay)
             let objectsHtml = '';
             if (objects.length > 0) {
                 objectsHtml = `
@@ -234,16 +231,12 @@
                             <div class="table-responsive">
                                 <table class="table table-striped">
                                     <thead>
-                                        <tr>
-                                            <th>Tipo</th>
-                                            <th>Confianza</th>
-                                            <th>Posición</th>
-                                        </tr>
+                                        <tr><th>Tipo</th><th>Confianza</th><th>Posición</th></tr>
                                     </thead>
                                     <tbody>
                                         ${objects.map(obj => {
                                             const cls = obj.class || obj.label || 'object';
-                                            const conf = (obj.confidence != null ? obj.confidence : obj.score) || 0;
+                                            const conf = (obj.confidence ?? obj.score ?? 0);
                                             const pos = obj.position || obj.box || {};
                                             const x1 = pos.x1 ?? pos.xmin ?? '-';
                                             const y1 = pos.y1 ?? pos.ymin ?? '-';
@@ -254,18 +247,15 @@
                                                     <td>${cls}</td>
                                                     <td>${(Number(conf) * 100).toFixed(1)}%</td>
                                                     <td>(${x1}, ${y1}) a (${x2}, ${y2})</td>
-                                                </tr>
-                                            `;
+                                                </tr>`;
                                         }).join('')}
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-                    </div>
-                `;
+                    </div>`;
             }
 
-            // Imagen de salida: preferir base64 si llega, sino URL del backend
             const imgTag = imgBase64
                 ? `<img src="data:image/jpeg;base64,${imgBase64}" class="img-fluid rounded shadow">`
                 : (imgUrl ? `<img src="${imgUrl}" class="img-fluid rounded shadow">` : `<div class="text-muted">No preview available</div>`);
@@ -279,9 +269,7 @@
                     </div>
                     <div class="card-body">
                         ${alertHtml}
-                        <div class="text-center mt-4">
-                            ${imgTag}
-                        </div>
+                        <div class="text-center mt-4">${imgTag}</div>
                         ${objectsHtml}
                         <div class="mt-4 text-center">
                             <a href="${downloadHref}" class="btn btn-primary" download>
@@ -292,9 +280,7 @@
                             </button>
                         </div>
                     </div>
-                </div>
-            `;
-
+                </div>`;
             document.getElementById('image-result').innerHTML = resultHtml;
 
         } catch (error) {
@@ -316,10 +302,7 @@
 
         try {
             const formData = new FormData(form);
-            const response = await apiFetch('/upload/video', {
-                method: 'POST',
-                body: formData
-            });
+            const response = await apiFetch('/upload/video', { method: 'POST', body: formData });
 
             if (!response.ok) {
                 let msg = 'Error en el procesamiento';
@@ -327,47 +310,38 @@
                     const ct = response.headers.get('content-type') || '';
                     if (ct.includes('application/json')) {
                         const err = await response.json();
-                        if (err && (err.message || err.error)) msg = err.message || err.error;
+                        msg = err?.message || err?.error || msg;
                     } else {
-                        msg = await response.text();
+                        msg = (await response.text()) || msg;
                     }
-                } catch(_) {}
+                } catch {}
                 throw new Error(msg || `HTTP ${response.status}`);
             }
 
             const ct = response.headers.get('content-type') || '';
-            if (!ct.includes('application/json')) {
-                throw new Error('Respuesta inesperada (no JSON)');
-            }
+            if (!ct.includes('application/json')) throw new Error('Respuesta inesperada (no JSON)');
 
             const data = await response.json();
             document.getElementById('video-placeholder').style.display = 'none';
 
-            const alertFlag = !!(data.alert || data.danger_detected || data.has_threat);
+            const alertFlag     = !!(data.alert || data.danger_detected || data.has_threat);
             const processedVideo = data.processed_video || data.video_url || '';
 
-            let alertHtml = '';
-            if (alertFlag) {
-                alertHtml = `
-                    <div class="alert alert-danger d-flex align-items-center">
-                        <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
-                        <div>
-                            <h4 class="alert-heading">¡ALERTA DE SEGURIDAD!</h4>
-                            <p class="mb-0">Se detectaron objetos peligrosos en el video</p>
-                        </div>
+            const alertHtml = alertFlag ? `
+                <div class="alert alert-danger d-flex align-items-center">
+                    <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
+                    <div>
+                        <h4 class="alert-heading">¡ALERTA DE SEGURIDAD!</h4>
+                        <p class="mb-0">Se detectaron objetos peligrosos en el video</p>
                     </div>
-                `;
-            } else {
-                alertHtml = `
-                    <div class="alert alert-success d-flex align-items-center">
-                        <i class="bi bi-check-circle-fill fs-3 me-3"></i>
-                        <div>
-                            <h4 class="alert-heading">Video seguro</h4>
-                            <p class="mb-0">No se detectaron objetos peligrosos en el video</p>
-                        </div>
+                </div>` : `
+                <div class="alert alert-success d-flex align-items-center">
+                    <i class="bi bi-check-circle-fill fs-3 me-3"></i>
+                    <div>
+                        <h4 class="alert-heading">Video seguro</h4>
+                        <p class="mb-0">No se detectaron objetos peligrosos en el video</p>
                     </div>
-                `;
-            }
+                </div>`;
 
             const videoHtml = `
                 <div class="card">
@@ -381,20 +355,16 @@
                                 <video controls class="w-100 rounded shadow">
                                     <source src="${processedVideo}" type="video/mp4">
                                     Tu navegador no soporta videos HTML5.
-                                </video>
-                            ` : `<div class="text-muted">No processed video available</div>`}
+                                </video>` : `<div class="text-muted">No processed video available</div>`}
                         </div>
                         <div class="mt-4 text-center">
                             ${processedVideo ? `
                                 <a href="${processedVideo}" class="btn btn-success" download>
                                     <i class="bi bi-download me-2"></i>Descargar Video
-                                </a>
-                            ` : ``}
+                                </a>` : ``}
                         </div>
                     </div>
-                </div>
-            `;
-
+                </div>`;
             document.getElementById('video-result').innerHTML = videoHtml;
 
         } catch (error) {
