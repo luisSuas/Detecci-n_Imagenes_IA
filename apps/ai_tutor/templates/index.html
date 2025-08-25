@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/favicon.ico') }}" />
+  <!-- usa el nombre de ruta único del static de AI Tutor -->
+  <link rel="icon" type="image/x-icon" href="{{ url_for('ai_tutor_static', filename='icon/favicon.ico') }}" />
   <title>AI Tutor 🤖 x-Jobs</title>
 
   <!-- Fuentes -->
@@ -14,8 +15,8 @@
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
         crossorigin="anonymous" referrerpolicy="no-referrer" />
 
-  <!-- Tu estilo local (funciona con subruta gracias a url_for) -->
-  <link href="{{ url_for('static', filename='css/neumorphism.css') }}" rel="stylesheet">
+  <!-- Estilo local (con url_for al static de AI Tutor) -->
+  <link href="{{ url_for('ai_tutor_static', filename='css/neumorphism.css') }}" rel="stylesheet">
 </head>
 <body>
   <div class="ai-container">
@@ -50,13 +51,13 @@
     </div>
   </div>
 
-  <!-- (Opcional, no rompe nada) expone el base-path si la app está montada bajo subruta -->
+  <!-- (Opcional) base-path si la app está montada bajo subruta -->
   <script>
     window.APP_BASE = window.APP_BASE || "{{ request.scope.get('root_path','') }}";
   </script>
 
-  <!-- JS locales (rutas correctas en prod) -->
-  <script src="{{ url_for('static', filename='js/voice.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+  <!-- JS locales (usar el static de AI Tutor) -->
+  <script src="{{ url_for('ai_tutor_static', filename='js/voice.js') }}"></script>
+  <script src="{{ url_for('ai_tutor_static', filename='js/chat.js') }}"></script>
 </body>
 </html>
