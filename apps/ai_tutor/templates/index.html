@@ -6,12 +6,15 @@
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/favicon.ico') }}" />
   <title>AI Tutor 🤖 x-Jobs</title>
 
+  <!-- Fuentes -->
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
 
-  <!-- Font Awesome via CSS (evita CORS del kit .js) -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Font Awesome vía CSS (evita CORS del kit .js) -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
 
-  <!-- Tu estilo local (soporta subpath con url_for) -->
+  <!-- Tu estilo local (funciona con subruta gracias a url_for) -->
   <link href="{{ url_for('static', filename='css/neumorphism.css') }}" rel="stylesheet">
 </head>
 <body>
@@ -27,7 +30,7 @@
 
       <div class="ai-input-group">
         <div class="voice-controls">
-          <button id="voice-btn" class="ai-btn voice-btn">
+          <button id="voice-btn" class="ai-btn voice-btn" type="button">
             <span class="pulse-animation"></span>
             <i class="fas fa-microphone"></i>
           </button>
@@ -35,7 +38,7 @@
         </div>
 
         <input type="text" id="user-input" placeholder="Escribe tu pregunta...">
-        <button id="send-btn" class="ai-btn send-btn">
+        <button id="send-btn" class="ai-btn send-btn" type="button">
           <i class="fas fa-paper-plane"></i>
         </button>
       </div>
@@ -47,7 +50,12 @@
     </div>
   </div>
 
-  <!-- JS locales (usando url_for para rutas correctas en prod) -->
+  <!-- (Opcional, no rompe nada) expone el base-path si la app está montada bajo subruta -->
+  <script>
+    window.APP_BASE = window.APP_BASE || "{{ request.scope.get('root_path','') }}";
+  </script>
+
+  <!-- JS locales (rutas correctas en prod) -->
   <script src="{{ url_for('static', filename='js/voice.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 </body>
