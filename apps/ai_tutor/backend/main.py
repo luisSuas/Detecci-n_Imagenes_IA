@@ -19,11 +19,22 @@ app = FastAPI(title="Tutor AI Futurista")
 FILE_DIR = Path(__file__).resolve().parent
 BASE = FILE_DIR if (FILE_DIR / "static").exists() and (FILE_DIR / "templates").exists() else FILE_DIR.parent
 
-# ✅ PATH y NOMBRE ÚNICOS para esta sub-app (coinciden con el usado en url_for)
-#    En producción, si esta app está montada en /ai-tutor, los assets quedarán en /ai-tutor/ai-tutor-static/...
-app.mount("/ai-tutor-static", StaticFiles(directory=str(BASE / "static")), name="ai_tutor_static")
+# Prefijo público ÚNICO para este submódulo
+STATIC_MOUNT = "/ai-tutor-static"
 
+# Montaje del estático con nombre propio
+app.mount(STATIC_MOUNT, StaticFiles(directory=str(BASE / "static")), name="ai_tutor_static")
+
+# Plantillas
 templates = Jinja2Templates(directory=str(BASE / "templates"))
+
+# Helper para construir URLs estáticas que respeten root_path y el prefijo del mount
+def static_url(request: Request, rel_path: str) -> str:
+    root = request.scope.get("root_path", "") or ""
+    return f"{root}{STATIC_MOUNT}/{rel_path.lstrip('/')}"
+
+# Disponible en todas las plantillas
+templates.env.globals["static_url"] = static_url
 
 # Asegurar carpeta de audio
 os.makedirs(BASE / "static" / "audio", exist_ok=True)
@@ -60,21 +71,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 # 2) sintetizar y mandar URL de audio servible
                 audio_fs_path = voice_processor.text_to_speech(response)
 
-                # Respetar root_path cuando esta sub-app está bajo prefijo (/ai-tutor)
+                # Respetar root_path cuando esta sub-app está bajo prefijo (p.ej. /ai-tutor)
                 root = websocket.scope.get("root_path", "") or ""
                 try:
                     static_root = (BASE / "static").resolve()
                     rel = Path(audio_fs_path).resolve().relative_to(static_root)
-                    # Usa el MISMO prefijo público del mount de arriba
-                    audio_url = f"{root}/ai-tutor-static/{rel.as_posix()}"
+                    audio_url = f"{root}{STATIC_MOUNT}/{rel.as_posix()}"
                 except Exception:
+                    # Fallbacks por si llega una ruta ya relativa/absoluta
                     p = str(audio_fs_path).replace("\\", "/")
-                    if p.startswith("/ai-tutor-static/"):
+                    if p.startswith(STATIC_MOUNT + "/"):
                         audio_url = f"{root}{p}"
-                    elif p.startswith("ai-tutor-static/"):
-                        audio_url = f"{root}/{p}"
+                    elif p.startswith("static/"):
+                        # lo normalizamos al mount actual para servirlo correctamente
+                        audio_url = f"{root}{STATIC_MOUNT}/{p.split('static/', 1)[1]}"
                     else:
-                        audio_url = p  # último recurso
+                        audio_url = p  # último recurso (no recomendado)
 
                 await websocket.send_json({"type": "audio", "path": audio_url})
 

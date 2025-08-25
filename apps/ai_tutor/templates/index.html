@@ -6,7 +6,7 @@
 
   <!-- Favicon servido por el static de la sub-app -->
   <link rel="icon" type="image/x-icon"
-        href="{{ url_for('ai_tutor_static', filename='icon/favicon.ico') }}" />
+        href="{{ static_url(request, 'icon/favicon.ico') }}" />
 
   <title>AI Tutor 🤖 x-Jobs</title>
 
@@ -19,8 +19,7 @@
         crossorigin="anonymous" referrerpolicy="no-referrer" />
 
   <!-- Estilo local servido por la sub-app -->
-  <link rel="stylesheet"
-        href="{{ url_for('ai_tutor_static', filename='css/neumorphism.css') }}">
+  <link rel="stylesheet" href="{{ static_url(request, 'css/neumorphism.css') }}">
 </head>
 <body>
   <div class="ai-container">
@@ -61,7 +60,7 @@
   </script>
 
   <!-- JS locales servidos por la sub-app -->
-  <script src="{{ url_for('ai_tutor_static', filename='js/voice.js') }}"></script>
-  <script src="{{ url_for('ai_tutor_static', filename='js/chat.js') }}"></script>
+  <script src="{{ static_url(request, 'js/voice.js') }}"></script>
+  <script src="{{ static_url(request, 'js/chat.js') }}"></script>
 </body>
 </html>
