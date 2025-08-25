@@ -19,8 +19,10 @@ app = FastAPI(title="Tutor AI Futurista")
 FILE_DIR = Path(__file__).resolve().parent
 BASE = FILE_DIR if (FILE_DIR / "static").exists() and (FILE_DIR / "templates").exists() else FILE_DIR.parent
 
-# ⚠️ Nombre único para evitar colisión con la app principal
-app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="ai_tutor_static")
+# ✅ PATH y NOMBRE ÚNICOS para esta sub-app (coinciden con el usado en url_for)
+#    En producción, si esta app está montada en /ai-tutor, los assets quedarán en /ai-tutor/ai-tutor-static/...
+app.mount("/ai-tutor-static", StaticFiles(directory=str(BASE / "static")), name="ai_tutor_static")
+
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
 # Asegurar carpeta de audio
@@ -58,19 +60,21 @@ async def websocket_endpoint(websocket: WebSocket):
                 # 2) sintetizar y mandar URL de audio servible
                 audio_fs_path = voice_processor.text_to_speech(response)
 
+                # Respetar root_path cuando esta sub-app está bajo prefijo (/ai-tutor)
                 root = websocket.scope.get("root_path", "") or ""
                 try:
                     static_root = (BASE / "static").resolve()
                     rel = Path(audio_fs_path).resolve().relative_to(static_root)
-                    audio_url = f"{root}/static/{rel.as_posix()}"
+                    # Usa el MISMO prefijo público del mount de arriba
+                    audio_url = f"{root}/ai-tutor-static/{rel.as_posix()}"
                 except Exception:
                     p = str(audio_fs_path).replace("\\", "/")
-                    if p.startswith("/static/"):
+                    if p.startswith("/ai-tutor-static/"):
                         audio_url = f"{root}{p}"
-                    elif p.startswith("static/"):
+                    elif p.startswith("ai-tutor-static/"):
                         audio_url = f"{root}/{p}"
                     else:
-                        audio_url = p
+                        audio_url = p  # último recurso
 
                 await websocket.send_json({"type": "audio", "path": audio_url})
 

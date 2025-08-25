@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- usa el nombre de ruta único del static de AI Tutor -->
-  <link rel="icon" type="image/x-icon" href="{{ url_for('ai_tutor_static', filename='icon/favicon.ico') }}" />
+
+  <!-- Favicon servido por el static de la sub-app -->
+  <link rel="icon" type="image/x-icon"
+        href="{{ url_for('ai_tutor_static', filename='icon/favicon.ico') }}" />
+
   <title>AI Tutor 🤖 x-Jobs</title>
 
   <!-- Fuentes -->
@@ -15,8 +18,9 @@
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
         crossorigin="anonymous" referrerpolicy="no-referrer" />
 
-  <!-- Estilo local (con url_for al static de AI Tutor) -->
-  <link href="{{ url_for('ai_tutor_static', filename='css/neumorphism.css') }}" rel="stylesheet">
+  <!-- Estilo local servido por la sub-app -->
+  <link rel="stylesheet"
+        href="{{ url_for('ai_tutor_static', filename='css/neumorphism.css') }}">
 </head>
 <body>
   <div class="ai-container">
@@ -56,7 +60,7 @@
     window.APP_BASE = window.APP_BASE || "{{ request.scope.get('root_path','') }}";
   </script>
 
-  <!-- JS locales (usar el static de AI Tutor) -->
+  <!-- JS locales servidos por la sub-app -->
   <script src="{{ url_for('ai_tutor_static', filename='js/voice.js') }}"></script>
   <script src="{{ url_for('ai_tutor_static', filename='js/chat.js') }}"></script>
 </body>
