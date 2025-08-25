@@ -5,8 +5,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Favicon (usar url_for y barra normal) -->
-  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icon/favicon.ico') }}" />
+  <!-- Favicon -->
+  <link rel="icon" type="image/x-icon" href="{{ request.scope.get('root_path','') }}/static/icon/favicon.ico" />
 
   <title>AI Security | x-Jobs 🛡️</title>
 
@@ -15,15 +15,15 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
 
-  <!-- Tu CSS local (usar url_for para evitar 404) -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}" />
+  <!-- CSS local -->
+  <link rel="stylesheet" href="{{ request.scope.get('root_path','') }}/static/css/custom.css" />
 
   {% block head %}{% endblock %}
 </head>
 <body>
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
-      <a class="navbar-brand" href="/">
+      <a class="navbar-brand" href="{{ request.scope.get('root_path','') }}/">
         <i class="bi bi-shield-shaded me-2"></i>AI Security System XJobs
       </a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -32,10 +32,10 @@
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav ms-auto">
           <li class="nav-item">
-            <a class="nav-link" href="/"><i class="bi bi-house-door me-1"></i>Home</a>
+            <a class="nav-link" href="{{ request.scope.get('root_path','') }}/"><i class="bi bi-house-door me-1"></i>Home</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="/live"><i class="bi bi-camera-video me-1"></i>Live Camera</a>
+            <a class="nav-link" href="{{ request.scope.get('root_path','') }}/live"><i class="bi bi-camera-video me-1"></i>Live Camera</a>
           </li>
         </ul>
       </div>
