@@ -142,6 +142,16 @@
 
 {% block scripts %}
 <script>
+    // Utilidades mínimas para robustez en producción (subpaths, cookies/sesión)
+    const apiFetch = (path, opts={}) => {
+        // Permite que tu app funcione tras un proxy/subruta y con sesión
+        const url = path.startsWith('http') ? path : (new URL(path, window.location.origin)).toString();
+        return fetch(url, {
+            credentials: 'same-origin',
+            ...opts
+        });
+    };
+
     // Manejar envío de imagen
     document.getElementById('image-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -150,30 +160,53 @@
         const originalButtonText = button.innerHTML;
         button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';
         button.disabled = true;
-        
+
         try {
             const formData = new FormData(form);
-            const response = await fetch('/upload/image', { 
-                method: 'POST', 
-                body: formData 
+            const response = await apiFetch('/upload/image', {
+                method: 'POST',
+                body: formData
             });
-            
+
+            // Mensajes de error más claros (413, 415, 500, etc.)
             if (!response.ok) {
-                throw new Error('Error in processing');
+                let msg = 'Error in processing';
+                try {
+                    const ct = response.headers.get('content-type') || '';
+                    if (ct.includes('application/json')) {
+                        const err = await response.json();
+                        if (err && (err.message || err.error)) msg = err.message || err.error;
+                    } else {
+                        msg = await response.text();
+                    }
+                } catch(_) {}
+                throw new Error(msg || `HTTP ${response.status}`);
             }
-            
+
+            const ct = response.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) {
+                throw new Error('Unexpected response (not JSON)');
+            }
+
             const data = await response.json();
+
             document.getElementById('image-placeholder').style.display = 'none';
-            
-            // Mostrar resultado con alerta si es necesario
+
+            // Campos tolerantes: algunos backends usan nombres alternativos
+            const danger = !!(data.danger_detected || data.alert || data.has_threat);
+            const objects = Array.isArray(data.detected_objects) ? data.detected_objects : (Array.isArray(data.objects) ? data.objects : []);
+            const imgBase64 = data.image_base64 || data.result_image_base64 || '';
+            const imgUrl = data.image_url || data.result_image_url || '';
+
+            // Alerta
             let alertHtml = '';
-            if (data.danger_detected) {
+            if (danger) {
                 alertHtml = `
                     <div class="alert alert-danger d-flex align-items-center">
                         <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
                         <div>
                             <h4 class="alert-heading">¡SECURITY ALERT!</h4>
-                            <p class="mb-0">They have been detected ${data.detected_objects.length} dangerous objects in the image</p>
+                            <p class="mb-0">They have been detected ${objects.length} dangerous objects in the image</p>
                         </div>
                     </div>
                 `;
@@ -188,10 +221,10 @@
                     </div>
                 `;
             }
-            
-            // Construir lista de objetos detectados
+
+            // Lista de objetos (si hay)
             let objectsHtml = '';
-            if (data.detected_objects.length > 0) {
+            if (objects.length > 0) {
                 objectsHtml = `
                     <div class="card mt-3">
                         <div class="card-header bg-light">
@@ -208,13 +241,22 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${data.detected_objects.map(obj => `
-                                            <tr>
-                                                <td>${obj.class}</td>
-                                                <td>${(obj.confidence * 100).toFixed(1)}%</td>
-                                                <td>(${obj.position.x1}, ${obj.position.y1}) a (${obj.position.x2}, ${obj.position.y2})</td>
-                                            </tr>
-                                        `).join('')}
+                                        ${objects.map(obj => {
+                                            const cls = obj.class || obj.label || 'object';
+                                            const conf = (obj.confidence != null ? obj.confidence : obj.score) || 0;
+                                            const pos = obj.position || obj.box || {};
+                                            const x1 = pos.x1 ?? pos.xmin ?? '-';
+                                            const y1 = pos.y1 ?? pos.ymin ?? '-';
+                                            const x2 = pos.x2 ?? pos.xmax ?? '-';
+                                            const y2 = pos.y2 ?? pos.ymax ?? '-';
+                                            return `
+                                                <tr>
+                                                    <td>${cls}</td>
+                                                    <td>${(Number(conf) * 100).toFixed(1)}%</td>
+                                                    <td>(${x1}, ${y1}) a (${x2}, ${y2})</td>
+                                                </tr>
+                                            `;
+                                        }).join('')}
                                     </tbody>
                                 </table>
                             </div>
@@ -222,7 +264,14 @@
                     </div>
                 `;
             }
-            
+
+            // Imagen de salida: preferir base64 si llega, sino URL del backend
+            const imgTag = imgBase64
+                ? `<img src="data:image/jpeg;base64,${imgBase64}" class="img-fluid rounded shadow">`
+                : (imgUrl ? `<img src="${imgUrl}" class="img-fluid rounded shadow">` : `<div class="text-muted">No preview available</div>`);
+
+            const downloadHref = imgUrl || (imgBase64 ? `data:image/jpeg;base64,${imgBase64}` : '#');
+
             const resultHtml = `
                 <div class="card">
                     <div class="card-header bg-primary text-white">
@@ -231,31 +280,31 @@
                     <div class="card-body">
                         ${alertHtml}
                         <div class="text-center mt-4">
-                            <img src="data:image/jpeg;base64,${data.image_base64}" class="img-fluid rounded shadow">
+                            ${imgTag}
                         </div>
                         ${objectsHtml}
                         <div class="mt-4 text-center">
-                            <a href="${data.image_url}" class="btn btn-primary" download>
+                            <a href="${downloadHref}" class="btn btn-primary" download>
                                 <i class="bi bi-download me-2"></i>Download Image
                             </a>
-                            <button class="btn btn-outline-primary ms-2">
+                            <button class="btn btn-outline-primary ms-2" type="button" onclick="alert('Report saved!')">
                                 <i class="bi bi-save me-2"></i>Save Report
                             </button>
                         </div>
                     </div>
                 </div>
             `;
-            
+
             document.getElementById('image-result').innerHTML = resultHtml;
-            
+
         } catch (error) {
-            alert('Error: ' + error.message);
+            alert('Error: ' + (error?.message || error));
         } finally {
             button.innerHTML = originalButtonText;
             button.disabled = false;
         }
     });
-    
+
     // Manejar envío de video
     document.getElementById('video-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -264,23 +313,41 @@
         const originalButtonText = button.innerHTML;
         button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Procesando...';
         button.disabled = true;
-        
+
         try {
             const formData = new FormData(form);
-            const response = await fetch('/upload/video', { 
-                method: 'POST', 
-                body: formData 
+            const response = await apiFetch('/upload/video', {
+                method: 'POST',
+                body: formData
             });
-            
+
             if (!response.ok) {
-                throw new Error('Error en el procesamiento');
+                let msg = 'Error en el procesamiento';
+                try {
+                    const ct = response.headers.get('content-type') || '';
+                    if (ct.includes('application/json')) {
+                        const err = await response.json();
+                        if (err && (err.message || err.error)) msg = err.message || err.error;
+                    } else {
+                        msg = await response.text();
+                    }
+                } catch(_) {}
+                throw new Error(msg || `HTTP ${response.status}`);
             }
-            
+
+            const ct = response.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) {
+                throw new Error('Respuesta inesperada (no JSON)');
+            }
+
             const data = await response.json();
             document.getElementById('video-placeholder').style.display = 'none';
-            
+
+            const alertFlag = !!(data.alert || data.danger_detected || data.has_threat);
+            const processedVideo = data.processed_video || data.video_url || '';
+
             let alertHtml = '';
-            if (data.alert) {
+            if (alertFlag) {
                 alertHtml = `
                     <div class="alert alert-danger d-flex align-items-center">
                         <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
@@ -301,7 +368,7 @@
                     </div>
                 `;
             }
-            
+
             const videoHtml = `
                 <div class="card">
                     <div class="card-header bg-success text-white">
@@ -310,23 +377,28 @@
                     <div class="card-body">
                         ${alertHtml}
                         <div class="ratio ratio-16x9 mt-4">
-                            <video controls class="w-100 rounded shadow">
-                                <source src="${data.processed_video}" type="video/mp4">
-                                Tu navegador no soporta videos HTML5.
-                            </video>
+                            ${processedVideo ? `
+                                <video controls class="w-100 rounded shadow">
+                                    <source src="${processedVideo}" type="video/mp4">
+                                    Tu navegador no soporta videos HTML5.
+                                </video>
+                            ` : `<div class="text-muted">No processed video available</div>`}
                         </div>
                         <div class="mt-4 text-center">
-                            <a href="${data.processed_video}" class="btn btn-success" download>
-                                <i class="bi bi-download me-2"></i>Descargar Video
-                            </a>
+                            ${processedVideo ? `
+                                <a href="${processedVideo}" class="btn btn-success" download>
+                                    <i class="bi bi-download me-2"></i>Descargar Video
+                                </a>
+                            ` : ``}
                         </div>
                     </div>
                 </div>
             `;
-            
+
             document.getElementById('video-result').innerHTML = videoHtml;
+
         } catch (error) {
-            alert('Error: ' + error.message);
+            alert('Error: ' + (error?.message || error));
         } finally {
             button.innerHTML = originalButtonText;
             button.disabled = false;
