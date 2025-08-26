@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+
+  <title>AI Detect | X-Jobs</title>
+  <link rel="icon" href="/static/icon/favicon.ico" />
+
+  <!-- Iconos -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    referrerpolicy="no-referrer"
+  />
+
+  <!-- Estilos de producción -->
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <!-- Ajustes (idioma/tema) -->
+    <div class="settings-container">
+      <div class="language-switcher">
+        <span id="language-label">Idioma</span>
+        <select id="language-select" class="language-select">
+          <option value="es">Español</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <div class="theme-switcher">
+        <span id="theme-label">Tema</span>
+        <label class="switch">
+          <input type="checkbox" id="theme-toggle" />
+          <span class="slider">
+            <i class="fas fa-sun slider-icon sun-icon"></i>
+            <i class="fas fa-moon slider-icon moon-icon"></i>
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <header>
+      <img src="/static/imagenes/logo-black.svg" alt="X-Jobs Logo" />
+      <h1 class="futuristic-title">
+        <i class="fas fa-robot"></i>
+        <span id="title-text">Sistema de Detección de Objetos con IA</span>
+      </h1>
+      <p class="subtitle" id="subtitle-text">
+        Carga una imagen para analizar su contenido con inteligencia artificial
+      </p>
+    </header>
+
+    <div class="instructions">
+      <h3>
+        <i class="fas fa-info-circle"></i>
+        <span id="instructions-title">Instrucciones de uso</span>
+      </h3>
+      <ol id="instructions-list">
+        <li><span id="instruction-1">Arrastra una imagen o haz clic en "Seleccionar archivo"</span></li>
+        <li><span id="instruction-2">Haz clic en "Analizar Imagen" para procesarla con IA</span></li>
+        <li><span id="instruction-3">Revisa los objetos detectados y el análisis detallado</span></li>
+        <li><span id="instruction-4">Interactúa con el chatbot mediante texto o voz</span></li>
+        <li><span id="instruction-5">Para analizar otra imagen, haz clic en "Limpiar"</span></li>
+        <li><span id="instruction-6">Usa los controles en la esquina superior derecha para cambiar entre tema claro/oscuro e idioma</span></li>
+      </ol>
+    </div>
+
+    <main>
+      <!-- Upload -->
+      <div class="upload-section">
+        <div id="drop-area" class="drop-zone">
+          <p>
+            <i class="fas fa-cloud-upload-alt"></i>
+            <span id="drop-text">Arrastra y suelta tu imagen aquí</span>
+          </p>
+          <p><span id="or-text">o</span></p>
+          <input type="file" id="file-input" accept="image/*" hidden />
+          <button id="browse-button" class="futuristic-button">
+            <i class="fas fa-folder-open"></i>
+            <span id="browse-text">Seleccionar archivo</span>
+          </button>
+        </div>
+
+        <div class="preview-container">
+          <img id="preview" class="hidden" alt="Vista previa" />
+          <canvas id="canvas"></canvas>
+        </div>
+
+        <div>
+          <br />
+          <button id="analyze-button" class="futuristic-button" disabled>
+            <i class="fas fa-search"></i>
+            <span id="analyze-text">Analizar Imagen</span>
+          </button>
+          <button id="clear-button" class="futuristic-button">
+            <i class="fas fa-trash"></i>
+            <span id="clear-text">Limpiar</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Resultados -->
+      <div class="results-section hidden">
+        <h2>
+          <i class="fas fa-chart-bar"></i>
+          <span id="results-title">Resultados del Análisis</span>
+        </h2>
+
+        <div class="stats">
+          <div class="stat-item">
+            <div class="stat-value" id="total-objects">0</div>
+            <div class="stat-label" id="objects-label">Objetos Detectados</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="unique-objects">0</div>
+            <div class="stat-label" id="types-label">Tipos Diferentes</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="confidence">0%</div>
+            <div class="stat-label" id="accuracy-label">Precisión Media</div>
+          </div>
+        </div>
+
+        <div class="image-comparison">
+          <div class="image-container">
+            <h4 id="original-image-label">Imagen Original</h4>
+            <img id="original-image" class="comparison-image" alt="Imagen original" />
+          </div>
+          <div class="image-container">
+            <h4 id="processed-image-label">Imagen con Detección</h4>
+            <img id="processed-image" class="comparison-image" alt="Imagen procesada" />
+          </div>
+        </div>
+
+        <div class="results-grid">
+          <div class="result-card">
+            <h3>
+              <i class="fas fa-list"></i>
+              <span id="objects-title">Objetos Detectados</span>
+            </h3>
+            <div id="objects-table-container">
+              <table class="objects-table">
+                <thead>
+                  <tr>
+                    <th id="object-header">Objeto</th>
+                    <th id="quantity-header">Cantidad</th>
+                    <th id="accuracy-header">Precisión</th>
+                  </tr>
+                </thead>
+                <tbody id="objects-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="result-card">
+            <h3>
+              <i class="fas fa-microscope"></i>
+              <span id="analysis-title">Análisis Detallado</span>
+            </h3>
+            <p id="detailed-analysis">Cargando análisis...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat -->
+      <div class="chat-section">
+        <h2>
+          <i class="fas fa-comments"></i>
+          <span id="assistant-title">Asistente por Voz</span>
+        </h2>
+        <div class="chat-container">
+          <div id="chat-messages" class="chat-messages">
+            <div class="message bot-message" id="welcome-message">
+              ¡Hola! Soy tu asistente de IA. Puedo ayudarte a analizar imágenes. Sube una imagen y haz clic en "Analizar" para comenzar.
+            </div>
+          </div>
+          <div class="chat-input">
+            <input type="text" id="chat-input-text" placeholder="Escribe tu mensaje..." />
+            <button id="voice-button" class="voice-button" aria-label="Hablar">
+              <i class="fas fa-microphone"></i>
+            </button>
+            <button id="send-button" class="futuristic-button">
+              <span id="send-text">Enviar</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <div class="footer">
+      <p id="footer-text">Sistema de Detección de Objetos con IA</p>
+    </div>
+  </div>
+
+  <!-- Overlay de carga -->
+  <div class="loading-overlay hidden" role="status" aria-live="polite">
+    <div class="loading-spinner"></div>
+    <p id="loading-text">Analizando con IA...</p>
+    <p id="loading-status">Procesando imagen...</p>
+  </div>
+
+  <!-- JS de producción -->
+  <script src="/static/js/script.js" defer></script>
+</body>
+</html>
