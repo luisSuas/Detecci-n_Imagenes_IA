@@ -60,7 +60,7 @@
   </script>
 
   <!-- JS locales servidos por la sub-app -->
-  <script src="{{ url_for('ai_tutor_static', filename='js/voice.js') }}?v=5"></script>
-<script src="{{ url_for('ai_tutor_static', filename='js/chat.js') }}?v=5"></script>
+  <script src="{{ static_url(request, 'js/voice.js') }}"></script>
+  <script src="{{ static_url(request, 'js/chat.js') }}"></script>
 </body>
 </html>

@@ -1,21 +1,31 @@
+// static/js/chat.js
 class ChatInterface {
   constructor() {
     // Subruta inyectada desde el template ("" o algo como "/ai-tutor")
     this.BASE_PATH = window.APP_BASE || "";
 
-    // HTTPS -> WSS, HTTP -> WS
+    // HTTPS -> WSS, HTTP -> WS (evita Mixed Content)
     const WS_PROTO = location.protocol === "https:" ? "wss" : "ws";
     const WS_URL   = `${WS_PROTO}://${location.host}${this.BASE_PATH}/ws`;
 
-    // Reusar una única conexión compartida para evitar múltiples sockets
-    window.__AI_TUTOR_WS__ = window.__AI_TUTOR_WS__ || new WebSocket(WS_URL);
+    // Reusar una única conexión global para no abrir múltiples sockets
+    if (
+      !window.__AI_TUTOR_WS__ ||
+      window.__AI_TUTOR_WS__.readyState === WebSocket.CLOSED ||
+      window.__AI_TUTOR_WS__.readyState === WebSocket.CLOSING
+    ) {
+      window.__AI_TUTOR_WS__ = new WebSocket(WS_URL);
+    }
     this.socket = window.__AI_TUTOR_WS__;
 
+    // Cola para mensajes cuando el socket aún no está abierto
+    this.pending = [];
+
     this.setupEventListeners();
-    this.setupSocketSideEffects();
+    this.bindSocketLifecycle();
   }
 
-  setupSocketSideEffects() {
+  bindSocketLifecycle() {
     const setStatus = (t) => {
       const el = document.getElementById("status-text");
       if (el) el.textContent = t;
@@ -23,10 +33,26 @@ class ChatInterface {
 
     if (!this.socket) return;
 
-    this.socket.addEventListener("open",  () => setStatus("Conectado - Listo para aprender"));
-    this.socket.addEventListener("close", () => setStatus("Desconectado. Intentando reconectar..."));
-    this.socket.addEventListener("error", () => setStatus("Problema de conexión"));
-    // NOTA: no añadimos onmessage aquí para no duplicar lo que ya maneja voice.js
+    // Evitar múltiples binds si este archivo se carga más de una vez
+    if (!this.socket.__chatBound__) {
+      this.socket.addEventListener("open", () => {
+        setStatus("Conectado - Listo para aprender");
+        // Enviar lo pendiente
+        while (this.pending.length && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(this.pending.shift());
+        }
+      });
+
+      this.socket.addEventListener("close", () =>
+        setStatus("Desconectado. Intentando reconectar...")
+      );
+      this.socket.addEventListener("error", () =>
+        setStatus("Problema de conexión")
+      );
+
+      // Importante: NO añadimos onmessage aquí para no duplicar lo que maneja voice.js
+      this.socket.__chatBound__ = true;
+    }
   }
 
   setupEventListeners() {
@@ -51,10 +77,13 @@ class ChatInterface {
     // Mostrar mensaje del usuario en la UI
     this.displayMessage(message, "user");
 
-    // Enviar por WS si está abierto; si no, mostrar estado (reconexión la maneja voice.js)
+    const payload = JSON.stringify({ type: "text", content: message });
+
+    // Enviar por WS si está abierto; si no, encolar y mostrar estado
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: "text", content: message }));
+      this.socket.send(payload);
     } else {
+      this.pending.push(payload);
       const el = document.getElementById("status-text");
       if (el) el.textContent = "Reconectando socket…";
     }

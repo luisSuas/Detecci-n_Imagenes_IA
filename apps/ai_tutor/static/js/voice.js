@@ -1,34 +1,45 @@
+// static/js/voice.js
 class VoiceAssistant {
   constructor() {
-    // Fallbacks seguros
+    // ── Reconocimiento de voz (fallback seguro)
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
       alert("Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.");
       return;
     }
 
-    this.recognition = new SR();
-    this.isListening = false;
+    this.recognition  = new SR();
+    this.isListening  = false;
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
-    // === Construcción de URL del WebSocket (HTTPS -> WSS) y soporta subruta ===
-    this.BASE_PATH = (window.APP_BASE || ""); // ej: "" o "/ai-tutor"
-    const WS_PROTO = (location.protocol === "https:") ? "wss" : "ws";
+    // ── Subruta (inyectada en el template) y URL WS con HTTPS→WSS
+    this.BASE_PATH = window.APP_BASE || "";            // ej: "" o "/ai-tutor"
+    const WS_PROTO = location.protocol === "https:" ? "wss" : "ws";
     const WS_URL   = `${WS_PROTO}://${location.host}${this.BASE_PATH}/ws`;
 
-    // Reutiliza una conexión global si ya existe (voz/chat comparten)
-    window.__AI_TUTOR_WS__ = window.__AI_TUTOR_WS__ || new WebSocket(WS_URL);
-    this.socket = window.__AI_TUTOR_WS__;
+    // ── Reutilizar socket global (compartido con chat.js) y recrearlo si está cerrado/cerrándose
+    if (
+      !window.__AI_TUTOR_WS__ ||
+      window.__AI_TUTOR_WS__.readyState === WebSocket.CLOSED ||
+      window.__AI_TUTOR_WS__.readyState === WebSocket.CLOSING
+    ) {
+      window.__AI_TUTOR_WS__ = new WebSocket(WS_URL);
+    }
+    this.socket   = window.__AI_TUTOR_WS__;
+    this.pending  = []; // cola de mensajes si el WS aún no está abierto
 
     this.setupRecognition();
     this.setupUI();
-    this.setupSocket();
+    this.bindSocketLifecycle(WS_URL);
   }
 
+  // ────────────────────────────────────────────────────────────
+  // Reconocimiento de voz
+  // ────────────────────────────────────────────────────────────
   setupRecognition() {
     this.recognition.lang = "es-ES";
-    this.recognition.interimResults = false;
-    this.recognition.maxAlternatives = 1;
+    this.recognition.interimResults   = false;
+    this.recognition.maxAlternatives  = 1;
 
     this.recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
@@ -42,71 +53,104 @@ class VoiceAssistant {
     };
   }
 
+  // ────────────────────────────────────────────────────────────
+  // UI
+  // ────────────────────────────────────────────────────────────
   setupUI() {
     this.voiceBtn    = document.getElementById("voice-btn");
     this.statusText  = document.getElementById("status-text");
     this.voiceStatus = document.getElementById("voice-status");
 
-    this.voiceBtn.addEventListener("click", async () => {
-      // Algunos navegadores exigen interacción para reproducir audio
-      try { await this.audioContext.resume(); } catch (_) {}
+    if (this.voiceBtn) {
+      this.voiceBtn.addEventListener("click", async () => {
+        // Algunos navegadores exigen interacción para reproducir audio
+        try { await this.audioContext.resume(); } catch (_) {}
 
-      if (this.isListening) {
-        this.stopListening();
-      } else {
-        this.startListening();
-      }
-    });
+        if (this.isListening) this.stopListening();
+        else                  this.startListening();
+      });
+    }
   }
 
-  setupSocket() {
+  // ────────────────────────────────────────────────────────────
+  // WebSocket (ciclo de vida compartido; no pisar handlers)
+  // ────────────────────────────────────────────────────────────
+  bindSocketLifecycle(WS_URL) {
     if (!this.socket) return;
 
-    this.socket.onopen = () => {
-      this.updateStatus("Conectado - Listo para aprender");
-    };
+    // Evitamos múltiples binds si este script se carga más de una vez
+    if (!this.socket.__voiceBound__) {
+      this.socket.addEventListener("open", () => {
+        this.updateStatus("Conectado - Listo para aprender");
+        // Enviar cola pendiente
+        while (this.pending.length && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(this.pending.shift());
+        }
+      });
 
-    this.socket.onclose = () => {
-      this.updateStatus("Desconectado. Reintentando...");
-      // Reconexión ligera tras 1.5s
-      setTimeout(() => {
+      this.socket.addEventListener("message", (event) => {
+        // No interferimos con chat.js; sólo consumimos si es JSON conocido
         try {
-          const WS_PROTO = (location.protocol === "https:") ? "wss" : "ws";
-          const WS_URL   = `${WS_PROTO}://${location.host}${this.BASE_PATH}/ws`;
-          window.__AI_TUTOR_WS__ = new WebSocket(WS_URL);
-          this.socket = window.__AI_TUTOR_WS__;
-          this.setupSocket();
-        } catch (e) {
-          console.error("Reconexión WS falló:", e);
+          const data = JSON.parse(event.data);
+          if (data.type === "text") {
+            this.displayMessage(data.content, "ai");
+          } else if (data.type === "audio") {
+            this.playAudio(data.path);
+          }
+        } catch {
+          // mensajes no-JSON: ignorar
         }
-      }, 1500);
-    };
+      });
 
-    this.socket.onerror = () => {
-      this.updateStatus("Problema de conexión");
-    };
+      this.socket.addEventListener("error", () => {
+        this.updateStatus("Problema de conexión");
+      });
 
-    this.socket.onmessage = (event) => {
-      // El backend envía JSON con {type: "text"|"audio", ...}
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "text") {
-          this.displayMessage(data.content, "ai");
-        } else if (data.type === "audio") {
-          this.playAudio(data.path);
-        }
-      } catch (e) {
-        console.warn("Mensaje WS no-JSON (ignorado):", event.data);
-      }
-    };
+      this.socket.addEventListener("close", () => {
+        this.updateStatus("Desconectado. Reintentando...");
+        this.scheduleReconnect(WS_URL);
+      });
+
+      this.socket.__voiceBound__ = true;
+    }
   }
 
+  // Única rutina de reconexión (evita carreras entre chat/voice)
+  scheduleReconnect(WS_URL) {
+    if (window.__AI_TUTOR_WS_RECONNECTING__) return;
+    window.__AI_TUTOR_WS_RECONNECTING__ = true;
+
+    setTimeout(() => {
+      try {
+        // Si ya hay un socket abierto, no recrear
+        if (window.__AI_TUTOR_WS__ && window.__AI_TUTOR_WS__.readyState === WebSocket.OPEN) {
+          window.__AI_TUTOR_WS_RECONNECTING__ = false;
+          this.socket = window.__AI_TUTOR_WS__;
+          return;
+        }
+        window.__AI_TUTOR_WS__ = new WebSocket(WS_URL);
+        this.socket = window.__AI_TUTOR_WS__;
+        this.bindSocketLifecycle(WS_URL);
+      } catch (e) {
+        console.error("Reconexión WS falló:", e);
+      } finally {
+        // Quitamos el flag cuando el socket pase a OPEN o tras un pequeño margen
+        const clear = () => { window.__AI_TUTOR_WS_RECONNECTING__ = false; };
+        this.socket.addEventListener("open", clear, { once: true });
+        setTimeout(clear, 2000);
+      }
+    }, 1500);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Flujo de conversación
+  // ────────────────────────────────────────────────────────────
   startListening() {
     try {
       this.recognition.start();
       this.isListening = true;
-      this.voiceBtn.classList.add("recording");
-      this.voiceStatus.textContent = "Escuchando...";
+      if (this.voiceBtn) this.voiceBtn.classList.add("recording");
+      if (this.voiceStatus) this.voiceStatus.textContent = "Escuchando...";
       this.updateStatus("Reconociendo voz...");
     } catch (e) {
       console.error("Error al iniciar reconocimiento:", e);
@@ -116,65 +160,64 @@ class VoiceAssistant {
   stopListening() {
     try { this.recognition.stop(); } catch (_) {}
     this.isListening = false;
-    this.voiceBtn.classList.remove("recording");
-    this.voiceStatus.textContent = "Presiona para hablar";
+    if (this.voiceBtn) this.voiceBtn.classList.remove("recording");
+    if (this.voiceStatus) this.voiceStatus.textContent = "Presiona para hablar";
     this.updateStatus("Listo");
   }
 
   sendMessage(text) {
     this.displayMessage(text, "user");
 
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      this.updateStatus("Reconectando socket…");
-      return;
-    }
+    const payload = JSON.stringify({ type: "text", content: text });
 
-    this.socket.send(JSON.stringify({
-      type: "text",
-      content: text
-    }));
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(payload);
+    } else {
+      // Encolar y avisar; se envía al abrir
+      this.pending.push(payload);
+      this.updateStatus("Reconectando socket…");
+    }
   }
 
   displayMessage(text, sender) {
     const chatDisplay = document.getElementById("chat-display");
-    const messageDiv  = document.createElement("div");
+    if (!chatDisplay) return;
 
+    const messageDiv = document.createElement("div");
     messageDiv.classList.add("message", `${sender}-message`);
     messageDiv.textContent = text;
+
     chatDisplay.appendChild(messageDiv);
     chatDisplay.scrollTop = chatDisplay.scrollHeight;
   }
 
+  // ────────────────────────────────────────────────────────────
+  // Reproducción de audio (respeta subruta / paths relativos)
+  // ────────────────────────────────────────────────────────────
   playAudio(audioPath) {
     if (!audioPath) return;
 
-    // Normalizamos a URL absoluta; respeta subruta si viene relativa
     let url = audioPath;
+    // Si es relativo, construir URL absoluta respetando subruta
     if (!/^https?:\/\//i.test(audioPath)) {
       if (audioPath.startsWith("/")) {
         url = new URL(audioPath, location.origin).toString();
       } else {
-        // relativo: lo colgamos de la subruta si existe
-        const base = this.BASE_PATH.replace(/\/$/, "");
+        const base = (this.BASE_PATH || "").replace(/\/$/, "");
         url = new URL(`${base ? base + "/" : "/"}${audioPath}`, location.origin).toString();
       }
     }
 
     const audio = new Audio(url);
-    // En caso de política de autoplay estricta
-    audio.play().then(() => {
-      this.updateStatus("Reproduciendo respuesta...");
-    }).catch(() => {
-      this.updateStatus("Pulsa el botón para permitir audio");
-    });
-
-    audio.onended = () => {
-      this.updateStatus("Listo");
-    };
+    audio.play()
+      .then(() => this.updateStatus("Reproduciendo respuesta..."))
+      .catch(() => this.updateStatus("Pulsa el botón para permitir audio"));
+    audio.onended = () => this.updateStatus("Listo");
   }
 
   updateStatus(text) {
-    if (this.statusText) this.statusText.textContent = text;
+    const el = this.statusText || document.getElementById("status-text");
+    if (el) el.textContent = text;
   }
 }
 
