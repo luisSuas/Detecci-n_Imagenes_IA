@@ -252,6 +252,25 @@ def chat():
         return jsonify({"error": str(e)}), 500
 
 
+# Sirve assets del frontend directamente en la raíz de la app montada
+@app.get("/styles.css")
+def styles_root():
+    return send_from_directory(FRONTEND_DIR, "styles.css")
+
+@app.get("/script.js")
+def script_root():
+    return send_from_directory(FRONTEND_DIR, "script.js")
+
+@app.get("/logo-black.svg")
+def logo_root():
+    return send_from_directory(FRONTEND_DIR, "logo-black.svg")
+
+# Opcional: si tu index usa otros archivos en FRONTEND_DIR, expónlos genéricamente
+@app.get("/assets/<path:filename>")
+def front_assets(filename):
+    return send_from_directory(FRONTEND_DIR, filename)
+
+
 # ─────────────────────────────────────────────────────────────
 # Dev server
 # ─────────────────────────────────────────────────────────────
