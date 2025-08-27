@@ -36,3 +36,4 @@ torchaudio==2.1.2
 pip>=24.0
 setuptools>=65.5.1
 wheel
+flask-cors
