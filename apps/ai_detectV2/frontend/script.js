@@ -1,6 +1,15 @@
 // static/js/script.js
 document.addEventListener("DOMContentLoaded", () => {
   // ────────────────────────────────────────────────────────────
+  // Prefijo del app montado (p.ej. "/ai-detect-v2")
+  // ────────────────────────────────────────────────────────────
+  const API_BASE = (() => {
+    const seg = window.location.pathname.split("/").filter(Boolean)[0] || "";
+    return seg ? `/${seg}` : "";
+  })();
+  const api = (p) => `${API_BASE}${p.startsWith("/") ? p : `/${p}`}`;
+
+  // ────────────────────────────────────────────────────────────
   // Referencias del DOM (tolerantes si algo no existe)
   // ────────────────────────────────────────────────────────────
   const $ = (id) => document.getElementById(id);
@@ -35,7 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const languageSelect   = $("language-select");
 
   // Salir si el HTML no tiene lo básico (evita errores silenciosos)
-  if (!dropArea || !fileInput || !analyzeButton) return;
+  if (!dropArea || !fileInput || !analyzeButton || !canvas) return;
 
   // ────────────────────────────────────────────────────────────
   // Estado
@@ -203,13 +212,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const formData = new FormData();
       formData.append("file", currentFile);
 
-      const resp = await fetch("/upload", {
+      const resp = await fetch(api("/upload"), {
         method: "POST",
         body: formData,
         signal: controller.signal,
       });
 
-      // Manejo explícito de no-200
       if (!resp.ok) {
         let errMsg = `${resp.status} ${resp.statusText}`;
         try {
@@ -222,14 +230,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await resp.json();
       if (data.error) throw new Error(data.error);
 
-      // Dibuja la imagen de preview en el canvas (mismo tamaño)
       const ctx = canvas.getContext("2d");
       if (preview) ctx.drawImage(preview, 0, 0, canvas.width, canvas.height);
 
-      // Simula cajas (visual) a partir de los conteos
       drawFakeBoxes(ctx, data.objects_detected);
-
-      // Imagen "procesada"
       if (processedImage) processedImage.src = canvas.toDataURL("image/jpeg");
 
       showResults(data.objects_detected, data.analysis);
@@ -284,7 +288,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function showResults(objectsDetected, analysis) {
-    // KPIs
     let total = 0;
     const unique = Object.keys(objectsDetected || {}).length;
     Object.values(objectsDetected || {}).forEach((c) => (total += c));
@@ -293,7 +296,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (uniqueObjectsEl) uniqueObjectsEl.textContent = String(unique);
     if (confidenceEl) confidenceEl.textContent = "85%"; // simulado
 
-    // Tabla
     if (objectsTableBody) {
       objectsTableBody.innerHTML = "";
       Object.entries(objectsDetected || {}).forEach(([name, count]) => {
@@ -312,13 +314,9 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    // Análisis
     if (detailedAnalysis) detailedAnalysis.textContent = analysis || "";
-
-    // Mostrar sección
     if (resultsSection) resultsSection.classList.remove("hidden");
 
-    // Mensaje de chat
     const msg =
       currentLanguage === "es"
         ? `He analizado tu imagen y detectado ${total} objetos. ¿En qué más puedo ayudarte?`
@@ -329,9 +327,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // ────────────────────────────────────────────────────────────
   // Chat + Voz
   // ────────────────────────────────────────────────────────────
-  if (sendButton) {
-    sendButton.addEventListener("click", sendMessage);
-  }
+  if (sendButton) sendButton.addEventListener("click", sendMessage);
   if (chatInput) {
     chatInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") sendMessage();
@@ -345,11 +341,10 @@ document.addEventListener("DOMContentLoaded", () => {
     addMessageToChat(message, "user");
     chatInput.value = "";
 
-    // Timeout de 30s para chat
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), 30000);
 
-    fetch("/chat", {
+    fetch(api("/chat"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
@@ -413,7 +408,6 @@ document.addEventListener("DOMContentLoaded", () => {
     recognition.onerror = () => stopListening();
     recognition.onend = () => stopListening();
   } else if (voiceButton) {
-    // Ocultar botón si no hay soporte
     voiceButton.style.display = "none";
   }
 
