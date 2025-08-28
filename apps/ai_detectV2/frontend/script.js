@@ -335,7 +335,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const formData = new FormData();
       formData.append("file", currentFile);
 
-      const resp = await fetch(api("/upload"), {
+      const resp = await fetch(api(`/upload?lang=${encodeURIComponent(currentLanguage)}`), {
         method: "POST",
         body: formData,
         signal: controller.signal,
@@ -467,7 +467,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), 30000);
 
-    fetch(api("/chat"), {
+    fetch(api(`/chat?lang=${encodeURIComponent(currentLanguage)}`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),

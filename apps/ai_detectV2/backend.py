@@ -120,14 +120,16 @@ def upload_file():
         if not file or file.filename == "":
             return jsonify({"error": "Nombre de archivo vacío"}), 400
 
-        # Guarda temporalmente
         tmp_path = UPLOAD_DIR / file.filename
         file.save(tmp_path)
 
-        # Procesa
-        result = process_image(tmp_path)
+        # <<< NUEVO: idioma desde query (?lang=es|en)
+        lang = (request.args.get("lang") or "es").lower()
+        if lang not in ("es", "en"):
+            lang = "es"
 
-        # Limpia
+        result = process_image(tmp_path, lang=lang)   # <<< pasa lang
+
         try:
             tmp_path.unlink(missing_ok=True)
         except Exception:
@@ -138,37 +140,38 @@ def upload_file():
         return jsonify({"error": str(e)}), 500
 
 
-def process_image(image_path: Path):
-    # Asegura que se puede abrir
+def process_image(image_path: Path, lang: str = "es"):
     Image.open(image_path).close()
 
-    # A -> base64
     with open(image_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-    # Prompt y llamada a GPT-4o (vision) con API v1.x
-    prompt = (
-        "Analiza esta imagen y detalla todos los objetos visibles. "
-        "Proporciona una lista cuantificada de cada objeto encontrado, un análisis "
-        "detallado de la escena y sugerencias prácticas basadas en lo que observas. "
-        "Responde en español. Devuélvelo en formato JSON con: "
-        "{objects: [{name: string, count: number}], analysis: string, suggestions: string}"
-    )
+    # <<< NUEVO: prompt por idioma
+    if lang == "en":
+        prompt = (
+            "Analyze this image and list every visible object with counts. "
+            "Return a helpful scene analysis and practical suggestions based on what you see. "
+            "Answer in English. Return JSON as: "
+            "{objects: [{name: string, count: number}], analysis: string, suggestions: string}"
+        )
+    else:  # es
+        prompt = (
+            "Analiza esta imagen y detalla todos los objetos visibles. "
+            "Proporciona una lista cuantificada de cada objeto encontrado, un análisis "
+            "detallado de la escena y sugerencias prácticas basadas en lo que observas. "
+            "Responde en español. Devuélvelo en formato JSON con: "
+            "{objects: [{name: string, count: number}], analysis: string, suggestions: string}"
+        )
 
     resp = client.chat.completions.create(
         model="gpt-4o",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
-                    },
-                ],
-            }
-        ],
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+            ],
+        }],
         max_tokens=1000,
     )
 
@@ -230,16 +233,20 @@ def chat():
         if not user_message:
             return jsonify({"error": "Mensaje vacío"}), 400
 
+        lang = (request.args.get("lang") or "es").lower()
+        if lang not in ("es", "en"):
+            lang = "es"
+
+        system_msg = (
+            "Eres un asistente útil con un estilo futurista. Responde siempre en español."
+            if lang == "es" else
+            "You are a helpful assistant with a futuristic style. Always respond in English."
+        )
+
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",  # económico y rápido para chat
+            model="gpt-4o-mini",
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Eres un asistente útil con un estilo futurista. "
-                        "Responde en español e inglés cuando sea útil."
-                    ),
-                },
+                {"role": "system", "content": system_msg},
                 {"role": "user", "content": user_message},
             ],
             max_tokens=600,
