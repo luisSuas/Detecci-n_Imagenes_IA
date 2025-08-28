@@ -54,10 +54,46 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentLanguage = localStorage.getItem("language") || "es";
 
   // ────────────────────────────────────────────────────────────
-  // Traducciones
+  // Traducciones (UI + alerts)
   // ────────────────────────────────────────────────────────────
   const t = {
     es: {
+      // Textos de UI
+      title: "Sistema de Detección de Objetos con IA",
+      subtitle: "Carga una imagen para analizar su contenido con inteligencia artificial",
+      instructionsTitle: "Instrucciones de uso",
+      instruction1: "Arrastra una imagen o haz clic en \"Seleccionar archivo\"",
+      instruction2: "Haz clic en \"Analizar Imagen\" para procesarla con IA",
+      instruction3: "Revisa los objetos detectados y el análisis detallado",
+      instruction4: "Interactúa con el chatbot mediante texto o voz",
+      instruction5: "Para analizar otra imagen, haz clic en \"Limpiar\"",
+      instruction6: "Usa los controles en la esquina superior derecha para cambiar entre tema claro/oscuro e idioma",
+      dropText: "Arrastra y suelta tu imagen aquí",
+      orText: "o",
+      browseText: "Seleccionar archivo",
+      analyzeText: "Analizar Imagen",
+      clearText: "Limpiar",
+      resultsTitle: "Resultados del Análisis",
+      objectsLabel: "Objetos Detectados",
+      typesLabel: "Tipos Diferentes",
+      accuracyLabel: "Precisión Media",
+      originalImageLabel: "Imagen Original",
+      processedImageLabel: "Imagen con Detección",
+      objectsTitle: "Objetos Detectados",
+      objectHeader: "Objeto",
+      quantityHeader: "Cantidad",
+      accuracyHeader: "Precisión",
+      analysisTitle: "Análisis Detallado",
+      assistantTitle: "Asistente por Voz",
+      sendText: "Enviar",
+      footerText: "Sistema de Detección de Objetos con IA",
+      loadingText: "Analizando con IA...",
+      welcomeMessage:
+        "¡Hola! Soy tu asistente de IA. Puedo ayudarte a analizar imágenes. Sube una imagen y haz clic en \"Analizar\" para comenzar.",
+      languageLabel: "Idioma",
+      themeLabel: "Tema",
+
+      // Alerts / placeholders
       alerts: {
         invalidFile: "Por favor, selecciona un archivo de imagen válido.",
         selectFirst: "Por favor, selecciona una imagen primero.",
@@ -72,6 +108,42 @@ document.addEventListener("DOMContentLoaded", () => {
       chatPlaceholder: "Escribe tu mensaje...",
     },
     en: {
+      // UI
+      title: "AI Object Detection System",
+      subtitle: "Upload an image to analyze its content with artificial intelligence",
+      instructionsTitle: "Usage Instructions",
+      instruction1: "Drag an image or click on \"Select file\"",
+      instruction2: "Click on \"Analyze Image\" to process it with AI",
+      instruction3: "Review the detected objects and detailed analysis",
+      instruction4: "Interact with the chatbot via text or voice",
+      instruction5: "To analyze another image, click on \"Clear\"",
+      instruction6: "Use the controls in the top right corner to switch between light/dark theme and language",
+      dropText: "Drag and drop your image here",
+      orText: "or",
+      browseText: "Select file",
+      analyzeText: "Analyze Image",
+      clearText: "Clear",
+      resultsTitle: "Analysis Results",
+      objectsLabel: "Objects Detected",
+      typesLabel: "Different Types",
+      accuracyLabel: "Average Accuracy",
+      originalImageLabel: "Original Image",
+      processedImageLabel: "Image with Detection",
+      objectsTitle: "Detected Objects",
+      objectHeader: "Object",
+      quantityHeader: "Quantity",
+      accuracyHeader: "Accuracy",
+      analysisTitle: "Detailed Analysis",
+      assistantTitle: "Voice Assistant",
+      sendText: "Send",
+      footerText: "AI Object Detection System",
+      loadingText: "Analyzing with AI...",
+      welcomeMessage:
+        "Hello! I'm your AI assistant. I can help you analyze images. Upload an image and click \"Analyze\" to get started.",
+      languageLabel: "Language",
+      themeLabel: "Theme",
+
+      // Alerts / placeholders
       alerts: {
         invalidFile: "Please select a valid image file.",
         selectFirst: "Please select an image first.",
@@ -88,19 +160,71 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   // ────────────────────────────────────────────────────────────
-  // Idioma/Tema básicos (se asume index ya cambia todos los textos)
+  // Aplicar idioma a toda la UI
   // ────────────────────────────────────────────────────────────
-  if (languageSelect) {
-    languageSelect.addEventListener("change", (e) => {
-      currentLanguage = e.target.value;
-      localStorage.setItem("language", currentLanguage);
-      if (chatInput) chatInput.placeholder = t[currentLanguage].chatPlaceholder;
-      if (recognition) recognition.lang = currentLanguage === "es" ? "es-ES" : "en-US";
-    });
-    languageSelect.value = currentLanguage;
-  }
-  if (chatInput) chatInput.placeholder = t[currentLanguage].chatPlaceholder;
+  function applyLanguage(lang) {
+    currentLanguage = lang;
+    document.documentElement.lang = lang;
 
+    const map = {
+      "title-text": t[lang].title,
+      "subtitle-text": t[lang].subtitle,
+      "instructions-title": t[lang].instructionsTitle,
+      "instruction-1": t[lang].instruction1,
+      "instruction-2": t[lang].instruction2,
+      "instruction-3": t[lang].instruction3,
+      "instruction-4": t[lang].instruction4,
+      "instruction-5": t[lang].instruction5,
+      "instruction-6": t[lang].instruction6,
+      "drop-text": t[lang].dropText,
+      "or-text": t[lang].orText,
+      "browse-text": t[lang].browseText,
+      "analyze-text": t[lang].analyzeText,
+      "clear-text": t[lang].clearText,
+      "results-title": t[lang].resultsTitle,
+      "objects-label": t[lang].objectsLabel,
+      "types-label": t[lang].typesLabel,
+      "accuracy-label": t[lang].accuracyLabel,
+      "original-image-label": t[lang].originalImageLabel,
+      "processed-image-label": t[lang].processedImageLabel,
+      "objects-title": t[lang].objectsTitle,
+      "object-header": t[lang].objectHeader,
+      "quantity-header": t[lang].quantityHeader,
+      "accuracy-header": t[lang].accuracyHeader,
+      "analysis-title": t[lang].analysisTitle,
+      "assistant-title": t[lang].assistantTitle,
+      "send-text": t[lang].sendText,
+      "footer-text": t[lang].footerText,
+      "loading-text": t[lang].loadingText,
+      "welcome-message": t[lang].welcomeMessage,
+      "language-label": t[lang].languageLabel,
+      "theme-label": t[lang].themeLabel,
+    };
+
+    Object.entries(map).forEach(([id, text]) => {
+      const el = $(id);
+      if (el && typeof text === "string") el.textContent = text;
+    });
+
+    if (chatInput) chatInput.placeholder = t[lang].chatPlaceholder;
+    if (recognition) recognition.lang = lang === "es" ? "es-ES" : "en-US";
+    if (languageSelect) languageSelect.value = lang;
+
+    localStorage.setItem("language", lang);
+  }
+
+  // Selector de idioma → usar applyLanguage
+  if (languageSelect) {
+    languageSelect.addEventListener("change", (e) => applyLanguage(e.target.value));
+    applyLanguage(currentLanguage);
+  } else {
+    // fallback si no hay selector
+    applyLanguage(currentLanguage);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Tema (se mantiene igual)
+  // ────────────────────────────────────────────────────────────
   if (themeToggle) {
     themeToggle.addEventListener("change", (e) => {
       if (e.target.checked) {
@@ -204,7 +328,6 @@ document.addEventListener("DOMContentLoaded", () => {
     setLoading(true, t[currentLanguage].alerts.analyzing);
     setAnalyzeEnabled(false);
 
-    // Timeout de 45s
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
 
