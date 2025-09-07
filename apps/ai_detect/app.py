@@ -1,4 +1,3 @@
-# app.py — OpenAI Only + Voz (TTS/STT) + summary_tts_id + control de voz persistente (acento-robusto)
 from flask import Flask, render_template, request, jsonify, send_file
 import os
 from werkzeug.utils import secure_filename
@@ -14,13 +13,15 @@ from pathlib import Path
 # ========= Cargar .env =========
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# Acepta 'yolo' | 'llm' | 'auto' (compat: si no se define, asumimos 'yolo')
+DETECTOR_MODE = os.getenv("DETECTOR_MODE", "yolo").strip().lower()
 
 # Modelos por tarea (con retrocompatibilidad a OPENAI_MODEL)
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
 OPENAI_STT_MODEL  = os.getenv("OPENAI_STT_MODEL",  "gpt-4o-mini-transcribe")
 OPENAI_TTS_MODEL  = os.getenv("OPENAI_TTS_MODEL",  "gpt-4o-mini-tts")
 
-# Mantener compatibilidad con tu código anterior que usa OPENAI_MODEL
+# Mantener compatibilidad con código que usa OPENAI_MODEL
 OPENAI_MODEL = OPENAI_CHAT_MODEL
 
 # ========= OpenAI Client =========
@@ -41,6 +42,7 @@ else:
 # ========= Memoria / Estado =========
 last_result = None
 chat_progress = {}
+results_by_filename = {}
 
 # Voz global (persistente en el proceso)
 SPEECH_ENABLED = True  # voz activada por defecto
@@ -67,7 +69,7 @@ def _compact_result_for_llm(result: dict) -> dict:
         "solucion": [],
     }
     if isinstance(result.get("reporte_incidencia"), list):
-        for r in result["reporte_incidencia"][:3]:
+        for r in result["reporte_incidencia"][:8]:
             summary["reporte_incidencia"].append({
                 "problema": r.get("problema"),
                 "prioridad": r.get("prioridad"),
@@ -75,14 +77,14 @@ def _compact_result_for_llm(result: dict) -> dict:
                 "descripcion": r.get("descripcion")
             })
     if isinstance(result.get("solucion"), list):
-        for s in result["solucion"][:3]:
+        for s in result["solucion"][:8]:
             summary["solucion"].append({
                 "problema": s.get("problema"),
                 "pasos": s.get("pasos", [])[:5],
                 "workers_detalle": s.get("workers_detalle", {})
             })
     if not summary["reporte_incidencia"] and isinstance(result.get("detections"), list):
-        for d in result["detections"][:3]:
+        for d in result["detections"][:6]:
             summary["reporte_incidencia"].append({
                 "problema": d.get("class"),
                 "prioridad": d.get("severity"),
@@ -90,6 +92,19 @@ def _compact_result_for_llm(result: dict) -> dict:
                 "descripcion": d.get("description"),
             })
     return summary
+
+def _friendly_name(cls: str) -> str:
+    """Nombre legible para clases del detector."""
+    mapping = {
+        'filtracion_pared': 'enchufe por cambiar',
+        'fuga_techo': 'fuga en techo',
+        'tuberia_rota': 'tubería rota',
+        'equipo_oxidado': 'equipo oxidado'
+    }
+    if not cls:
+        return 'incidencia'
+    key = str(cls).lower()
+    return mapping.get(key, key.replace('_', ' '))
 
 def _speech_summary_from_result(result: dict) -> str:
     if not result:
@@ -105,7 +120,7 @@ def _speech_summary_from_result(result: dict) -> str:
         t = result["reporte_incidencia"][0]
         conf = t.get("confianza")
         conf_txt = f"{conf:.1f} por ciento" if isinstance(conf, (int, float)) else str(conf)
-        top_txt = f"Principal: {t.get('problema','incidencia')} con confianza {conf_txt}. "
+        top_txt = f"Principal: {_friendly_name(t.get('problema'))} con confianza {conf_txt}. "
 
     pasos = []
     if isinstance(r.get("acciones_recomendadas_globales"), list):
@@ -173,6 +188,7 @@ def _normalize_es(text: str) -> str:
     t = _spaces_before_punct.sub(r"\1", t)
     t = _spaces_after_open.sub(r"\1", t)
     t = _spaces_before_close.sub(r"\1", t)
+    # Capitaliza primera letra si procede
     if t and t[0].isalpha():
         t = t[0].upper() + t[1:]
     return t
@@ -192,7 +208,7 @@ def _smart_merge(prev: str, new: str) -> str:
     max_win = min(6, len(p_tokens), len(n_tokens))
     overlap = 0
 
-    for w in range(max_win, 2, -1):
+    for w in range(max_win, 2, -1):  # busca ventanas de 6..3
         if p_tokens[-w:] == n_tokens[:w]:
             overlap = w
             break
@@ -214,7 +230,7 @@ def _merge_and_normalize(chunks_map: dict) -> str:
         merged = _smart_merge(merged, chunks_map[k])
     return _normalize_es(merged)
 
-# ====== NUEVO: helpers de cache JSON ======
+# ====== helpers de cache JSON ======
 def load_cached_result(filename):
     """Lee el resultado de inspección cacheado como JSON en static/results/<filename>.json."""
     try:
@@ -225,7 +241,6 @@ def load_cached_result(filename):
     except Exception as e:
         app.logger.warning(f"No se pudo leer cache JSON: {e}")
     return None
-# ==========================================
 
 # ========= Flask (HUB-friendly paths) =========
 BASE_DIR = Path(__file__).resolve().parent
@@ -246,38 +261,80 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['RESULT_FOLDER'], exist_ok=True)
 
-# ========= Detector =========
+# ========= Detector YOLO =========
 try:
-    # Import relativo (funciona como paquete). Fallback absoluto para ejecución directa.
+    # Import relativo (paquete) y fallback absoluto (ejecución directa)
     try:
         from .detector_problemas import ProblemDetector  # type: ignore
     except Exception:
         from detector_problemas import ProblemDetector  # type: ignore
     try:
         detector = ProblemDetector()
-        print("✅ Detector de problemas inicializado con éxito")
+        print("✅ Detector de problemas (YOLO) inicializado con éxito")
     except Exception as e:
-        print(f"❌ Error al inicializar el detector: {str(e)}")
+        print(f"❌ Error al inicializar ProblemDetector: {str(e)}")
         detector = None
 except ImportError as e:
     print(f"❌ No se pudo importar el módulo detector: {str(e)}")
     detector = None
+
+# ========= Analizador LLM (opcional) =========
+llm_analyze = None
+if client is not None:
+    try:
+        try:
+            from .ai.llm_detector import analyze_image_to_structured  # type: ignore
+        except Exception:
+            from ai.llm_detector import analyze_image_to_structured  # type: ignore
+        llm_analyze = analyze_image_to_structured
+        print("🧪 Analizador LLM disponible")
+    except Exception as e:
+        print(f"⚠️ No se pudo importar ai.llm_detector: {e}")
+        llm_analyze = None
+
+# ========= Resolución dinámica del modo =========
+def resolve_mode():
+    """
+    Devuelve 'yolo' o 'llm' según:
+      - Si DETECTOR_MODE == 'yolo': usa YOLO si existe; si no, fallback a LLM si disponible.
+      - Si DETECTOR_MODE == 'llm': usa LLM; si no existe, será error.
+      - Si DETECTOR_MODE == 'auto': usa YOLO si existe; si no, LLM si existe; si ninguno, error.
+    """
+    mode = DETECTOR_MODE
+    if mode == "yolo":
+        if detector is not None:
+            return "yolo"
+        return "llm" if (client is not None and llm_analyze is not None) else "error"
+    if mode == "llm":
+        return "llm" if (client is not None and llm_analyze is not None) else "error"
+    # auto (o cualquier otro valor inesperado)
+    if detector is not None:
+        return "yolo"
+    if client is not None and llm_analyze is not None:
+        return "llm"
+    return "error"
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 @app.route('/')
 def index():
-    if detector is None:
-        return render_template('error.html',
-                               message="El sistema de detección no está disponible. Contacte al administrador.")
+    mode = resolve_mode()
+    if mode == "error":
+        msg = "No hay detector YOLO ni analizador LLM disponibles. Verifique dependencias/OPENAI_API_KEY."
+        return render_template('error.html', message=msg)
+    if mode == "yolo" and detector is None:
+        return render_template('error.html', message="El sistema de detección (YOLO) no está disponible.")
+    if mode == "llm" and (client is None or llm_analyze is None):
+        return render_template('error.html', message="OPENAI_API_KEY o analizador LLM no configurados.")
     return render_template('problemas.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
     global last_result
-    if detector is None:
-        return jsonify({'error': 'Sistema de detección no disponible'}), 503
+    mode = resolve_mode()
+    if mode == "error":
+        return jsonify({'error': 'No hay detector disponible (YOLO/LLM)'}), 503
     if 'file' not in request.files:
         return jsonify({'error': 'No se encontró archivo en la solicitud'}), 400
 
@@ -298,7 +355,21 @@ def upload_file():
             return jsonify({'error': 'Error al guardar el archivo'}), 500
 
         zona = request.form.get('zona', '')
-        result = detector.detect_problems(upload_path, zona=zona)
+        if mode == "llm":
+            try:
+                result = llm_analyze(
+                    client=client,
+                    model=OPENAI_CHAT_MODEL,
+                    image_path=upload_path,
+                    zona=zona,
+                    results_dir=app.config['RESULT_FOLDER']
+                )
+            except Exception as e:
+                app.logger.error(f"Error LLM al analizar imagen: {e}")
+                return jsonify({'error': 'Error interno del analizador LLM'}), 500
+        else:
+            # yolo
+            result = detector.detect_problems(upload_path, zona=zona)
         if not result or 'error' in result:
             return jsonify({'error': result.get('error', 'Error desconocido al procesar la imagen')}), 500
 
@@ -312,16 +383,16 @@ def upload_file():
             result["summary_tts_text"] = None
             result["summary_tts_id"] = ""
 
-        # ====== Cache JSON para chat/contexto
+        # Cache JSON para chat/contexto
         try:
             json_path = os.path.join(app.config['RESULT_FOLDER'], f"{filename}.json")
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False)
         except Exception as e:
             app.logger.warning(f"No se pudo cachear JSON en /upload: {e}")
-        # ======================================================================
 
         last_result = result
+        results_by_filename[filename] = result
         chat_progress.pop(filename, None)
 
         return jsonify(result)
@@ -353,6 +424,9 @@ def get_history():
 @app.route('/inspect/<filename>', methods=['GET'])
 def inspect_file(filename):
     global last_result
+    mode = resolve_mode()
+    if mode == "error":
+        return jsonify({'error': 'No hay detector disponible (YOLO/LLM)'}), 503
     if not allowed_file(filename):
         return jsonify({'error': 'Tipo de archivo no permitido'}), 400
     try:
@@ -362,7 +436,22 @@ def inspect_file(filename):
             return jsonify({'error': 'Archivo no encontrado'}), 404
 
         zona = request.args.get('zona', '')
-        result = detector.detect_problems(upload_path, zona=zona)
+        if mode == "llm":
+            if client is None or llm_analyze is None:
+                return jsonify({'error': 'OPENAI_API_KEY o analizador LLM no configurados'}), 503
+            try:
+                result = llm_analyze(
+                    client=client,
+                    model=OPENAI_CHAT_MODEL,
+                    image_path=upload_path,
+                    zona=zona,
+                    results_dir=app.config['RESULT_FOLDER']
+                )
+            except Exception as e:
+                app.logger.error(f"Error LLM al analizar imagen: {e}")
+                return jsonify({'error': 'Error interno del analizador LLM'}), 500
+        else:
+            result = detector.detect_problems(upload_path, zona=zona)
         if not result or 'error' in result:
             return jsonify({'error': result.get('error', 'Error al procesar la imagen')}), 500
 
@@ -374,16 +463,16 @@ def inspect_file(filename):
             result["summary_tts_text"] = None
             result["summary_tts_id"] = ""
 
-        # ====== Cache JSON también aquí
+        # Cache JSON también aquí
         try:
             json_path = os.path.join(app.config['RESULT_FOLDER'], f"{filename}.json")
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False)
         except Exception as e:
             app.logger.warning(f"No se pudo cachear JSON en /inspect: {e}")
-        # ==============================================
 
         last_result = result
+        results_by_filename[filename] = result
         chat_progress.pop(filename, None)
         return jsonify(result)
     except Exception as e:
@@ -433,7 +522,7 @@ def ask():
     # Limpiar frases de control del prompt enviado al modelo
     question = _strip_control_phrases(raw_question)
 
-    # ====== Contexto desde cache JSON por filename (si existe)
+    # ====== Contexto desde cache JSON por filename (si existe) o last_result / o volver a correr
     ctx_result = last_result
     if filename:
         if not allowed_file(filename):
@@ -444,14 +533,27 @@ def ask():
         if cached:
             ctx_result = cached
         else:
-            # 2) Fallback: volver a correr el detector si existe el archivo
-            upload_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(filename))
-            if os.path.exists(upload_path) and detector is not None:
-                try:
-                    ctx_result = detector.detect_problems(upload_path)
-                except Exception as e:
-                    app.logger.error(f"Error creando contexto para chatbot: {str(e)}")
-    # ======================================================================
+            # 2) Si en memoria lo tenemos por nombre, úsalo
+            if filename in results_by_filename:
+                ctx_result = results_by_filename.get(filename)
+            else:
+                # 3) Fallback: volver a correr el detector si existe el archivo
+                upload_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(filename))
+                if os.path.exists(upload_path):
+                    try:
+                        mode_now = resolve_mode()
+                        if mode_now == "llm" and llm_analyze is not None:
+                            ctx_result = llm_analyze(
+                                client=client,
+                                model=OPENAI_CHAT_MODEL,
+                                image_path=upload_path,
+                                zona="",
+                                results_dir=app.config['RESULT_FOLDER']
+                            )
+                        elif mode_now == "yolo" and detector is not None:
+                            ctx_result = detector.detect_problems(upload_path)
+                    except Exception as e:
+                        app.logger.error(f"Error creando contexto para chatbot: {str(e)}")
 
     compact_ctx = _compact_result_for_llm(ctx_result) if ctx_result else {}
 
@@ -488,6 +590,13 @@ def ask():
         messages = [
             {"role": "system", "content": base_system},
             {"role": "system", "content": style_prompt},
+            # Reglas adicionales de coherencia (de tu local)
+            {"role": "system", "content": (
+                "Reglas de coherencia: 1) considera TODAS las incidencias del contexto (no solo una), "
+                "2) si el usuario pide acciones o 'que hago', sugiere pasos para cada incidencia detectada "
+                "empezando por la de mayor prioridad, 3) si hay conflictos (ej. agua cerca de equipo electrico), "
+                "advierte y prioriza seguridad/EPP."
+            )},
             {
                 "role": "user",
                 "content": (
@@ -536,7 +645,7 @@ def tts():
 
     try:
         with client.audio.speech.with_streaming_response.create(
-            model=OPENAI_TTS_MODEL,  # <- parametrizado
+            model=OPENAI_TTS_MODEL,
             voice=voice,
             input=text
         ) as speech:
@@ -698,7 +807,7 @@ def stt_close():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# ====== NUEVO ENDPOINT DE SALUD ======
+# ====== ENDPOINT DE SALUD ======
 @app.route("/healthz", methods=["GET"])
 def healthz():
     return {"ok": True}
