@@ -12,6 +12,8 @@ from apps.ai_detectV2.backend import app as detect_v2_flask_app
 # FastAPI (AI Tutor y AI Seguridad)
 from apps.ai_tutor.backend.main import app as tutor_app
 from apps.ai_seguridad.main import app as seguridad_app
+# Turist-Guide (FastAPI)
+from apps.turist_guide.main import app as turist_app  
 
 hub = FastAPI(title="Ángel · AI Hub")
 
@@ -20,6 +22,7 @@ hub.mount("/ai-detect", WSGIMiddleware(detect_flask_app))          # v1
 hub.mount("/ai-detect-v2", WSGIMiddleware(detect_v2_flask_app))    # v2 🚀
 hub.mount("/ai-tutor", tutor_app)
 hub.mount("/ai-seguridad", seguridad_app)
+hub.mount("/turist-guide", turist_app)
 
 @hub.get("/", response_class=HTMLResponse)
 def index():
@@ -30,6 +33,7 @@ def index():
       <li><a href="/ai-detect-v2">AI Detect · UI (v2)</a> · <a href="/ai-detect-v2/healthz">health</a></li>
       <li><a href="/ai-tutor">AI Tutor · UI</a> · <a href="/ai-tutor/docs">docs</a></li>
       <li><a href="/ai-seguridad">AI Seguridad · UI</a> · <a href="/ai-seguridad/docs">docs</a></li>
+      <li><a href="/turist-guide">Turist-Guide · UI</a></li>
     </ul>
     """
 
